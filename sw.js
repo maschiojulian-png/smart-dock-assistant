@@ -1,4 +1,4 @@
-const CACHE_NAME = 'smart-dock-v5';
+const CACHE_NAME = 'smart-dock-v6';
 const APP_SHELL = [
   './',
   './index.html',
@@ -37,8 +37,9 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url);
 
-  // Nunca interceptar APIs externas (Google, Gemini, Clima Open-Meteo, Nominatim)
+  // Nunca interceptar rotas de API próprias nem APIs externas
   if (
+    url.pathname.startsWith('/api/') ||
     url.hostname.includes('googleapis.com') ||
     url.hostname.includes('accounts.google.com') ||
     url.hostname.includes('open-meteo.com') ||

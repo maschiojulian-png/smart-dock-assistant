@@ -62,6 +62,8 @@
     calendarRefreshTimer: null,
 
     // Voz & Gemini
+    serverGeminiConfigured: false,
+    serverGoogleClientId: '',
     recognition: null,
     finalTranscript: '',
     lastReply: '',
@@ -217,13 +219,38 @@
     return (localStorage.getItem(STORAGE_KEYS.GEMINI_API_KEY) || '').trim();
   }
 
+  function hasGeminiAccess() {
+    return Boolean(getGeminiKey() || state.serverGeminiConfigured);
+  }
+
   function getGoogleClientId() {
-    return (localStorage.getItem(STORAGE_KEYS.GOOGLE_CLIENT_ID) || '').trim();
+    return (
+      localStorage.getItem(STORAGE_KEYS.GOOGLE_CLIENT_ID) ||
+      state.serverGoogleClientId ||
+      ''
+    ).trim();
   }
 
   function updateConfigBadge() {
-    const hasGemini = Boolean(getGeminiKey());
-    el.configBadge.classList.toggle('hidden', hasGemini);
+    el.configBadge.classList.toggle('hidden', hasGeminiAccess());
+  }
+
+  async function checkServerConfig() {
+    if (!/^https?:$/.test(window.location.protocol)) return;
+    try {
+      const res = await fetch('./api/gemini', { cache: 'no-store' });
+      if (!res.ok) return;
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) return;
+      const data = await res.json();
+      state.serverGeminiConfigured = Boolean(data.configured);
+      if (data.googleClientId) {
+        state.serverGoogleClientId = String(data.googleClientId).trim();
+      }
+      updateConfigBadge();
+    } catch {
+      // Rodando localmente sem serverless functions — segue normalmente com localStorage
+    }
   }
 
   function showToast(message, type = 'info', duration = 3600) {
@@ -1384,7 +1411,7 @@
       return;
     }
 
-    if (!getGeminiKey()) {
+    if (!hasGeminiAccess()) {
       showToast('Configure sua GEMINI_API_KEY antes de usar o assistente.', 'error', 4000);
       openSettingsModal('geminiKeyInput');
       return;
@@ -1482,7 +1509,9 @@
 
   async function askGemini(question) {
     const apiKey = getGeminiKey();
-    if (!apiKey) {
+    const useServerProxy = !apiKey && state.serverGeminiConfigured;
+
+    if (!apiKey && !useServerProxy) {
       showToast('Configure sua GEMINI_API_KEY nos Ajustes.', 'error', 4000);
       openSettingsModal('geminiKeyInput');
       return;
@@ -1531,7 +1560,11 @@
     state.currentAbortController = controller;
 
     try {
-      const response = await fetch(`${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+      const targetUrl = useServerProxy
+        ? './api/gemini'
+        : `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
+
+      const response = await fetch(targetUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1597,7 +1630,13 @@
   function openSettingsModal(focusFieldId = null) {
     el.geminiKeyInput.value = getGeminiKey();
     el.geminiKeyInput.type = 'password';
-    el.googleClientIdInput.value = getGoogleClientId();
+    el.geminiKeyInput.placeholder = state.serverGeminiConfigured
+      ? 'Conectada automaticamente via Vercel (opcional sobrescrever)'
+      : 'AIzaSy...';
+    el.googleClientIdInput.value = localStorage.getItem(STORAGE_KEYS.GOOGLE_CLIENT_ID) || '';
+    el.googleClientIdInput.placeholder = state.serverGoogleClientId
+      ? 'Conectado automaticamente via Vercel (opcional sobrescrever)'
+      : '1234567890-abcdefg.apps.googleusercontent.com';
     el.settingsCityInput.value = '';
     el.settingsCityInput.placeholder = `Atual: ${state.weatherLocation.name}`;
     el.speechRateInput.value = String(state.prefs.speechRate);
@@ -1814,6 +1853,7 @@
     updateConfigBadge();
     updateOnlineStatus();
     registerServiceWorker();
+    checkServerConfig();
 
     // Carrega clima imediatamente e atualiza a cada 15 minutos
     fetchWeather(true);
