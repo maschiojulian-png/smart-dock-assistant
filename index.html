@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+
+  <!-- Compatibilidade iOS Safari / Tela Cheia (Standalone PWA) -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Smart Dock" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="format-detection" content="telephone=no" />
+
+  <title>Smart Dock — Assistente Pessoal</title>
+
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg" />
+  <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Google Identity Services (OAuth 2.0 Client-Side) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body data-state="idle">
+  <!-- Fundo Ambiente Liquid iOS Dark -->
+  <div class="ambient-bg" aria-hidden="true">
+    <div class="ambient-orb orb-1"></div>
+    <div class="ambient-orb orb-2"></div>
+    <div class="ambient-orb orb-3"></div>
+  </div>
+
+  <div class="app-shell">
+    <!-- Barra Superior estilo iOS Control Center -->
+    <header class="top-bar">
+      <div class="brand-cluster">
+        <div class="status-pill">
+          <span class="status-dot" id="connectionDot" title="Status de conexão"></span>
+          <span class="brand-name">Smart Dock</span>
+        </div>
+        <button type="button" class="audio-unlock-pill" id="audioUnlockPill" title="Toque para habilitar áudio e voz no iOS">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+          </svg>
+          <span>Ativar áudio</span>
+        </button>
+      </div>
+
+      <div class="top-actions">
+        <button
+          type="button"
+          class="pill-btn"
+          id="wakeLockBtn"
+          aria-pressed="false"
+          title="Impedir que a tela desligue automaticamente"
+        >
+          <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"></circle>
+            <path d="M12 2v2"></path>
+            <path d="M12 20v2"></path>
+            <path d="m4.93 4.93 1.41 1.41"></path>
+            <path d="m17.66 17.66 1.41 1.41"></path>
+            <path d="M2 12h2"></path>
+            <path d="M20 12h2"></path>
+            <path d="m6.34 17.66-1.41 1.41"></path>
+            <path d="m19.07 4.93-1.41 1.41"></path>
+          </svg>
+          <span class="wake-label">Manter Tela Ligada</span>
+          <span class="wake-label-short">Tela</span>
+          <span class="wake-indicator" aria-hidden="true"></span>
+        </button>
+
+        <button
+          type="button"
+          class="icon-btn"
+          id="fullscreenBtn"
+          aria-label="Alternar tela cheia"
+          title="Tela cheia"
+        >
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3"></path>
+            <path d="M21 8V5a2 2 0 0 0-2-2h-3"></path>
+            <path d="M3 16v3a2 2 0 0 0 2 2h3"></path>
+            <path d="M16 21h3a2 2 0 0 0 2-2v-3"></path>
+          </svg>
+        </button>
+
+        <button
+          type="button"
+          class="icon-btn settings-trigger"
+          id="settingsBtn"
+          aria-label="Configurações"
+          title="Configurações (Chaves API, Clima e Preferências)"
+        >
+          <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          <span class="config-badge hidden" id="configBadge" title="Configure sua GEMINI_API_KEY"></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Bento Grid Estilo Apple iOS / StandBy -->
+    <main class="dock-grid">
+      <!-- Coluna Esquerda: Relógio StandBy + Assistente Apple Intelligence / Gemini -->
+      <section class="hero-column" aria-label="Relógio e Assistente de Voz">
+        <!-- Bloco do Relógio -->
+        <div class="clock-block">
+          <div class="date-pill">
+            <span class="greeting-badge" id="greetingText">Boa noite</span>
+            <span class="date-separator" aria-hidden="true">•</span>
+            <span class="date-display" id="dateDisplay">Carregando data...</span>
+          </div>
+
+          <div class="clock-display" aria-live="off">
+            <span class="clock-time" id="clockTime">00:00</span>
+            <div class="clock-side-meta">
+              <span class="clock-ampm hidden" id="clockAmPm"></span>
+              <span class="clock-seconds" id="clockSeconds">00</span>
+            </div>
+          </div>
+
+          <div class="next-event-chip hidden" id="nextEventChip">
+            <span class="chip-dot"></span>
+            <span id="nextEventChipText"></span>
+          </div>
+        </div>
+
+        <!-- Bloco do Assistente por Voz (Orb estilo Apple Intelligence) -->
+        <div class="assistant-block">
+          <div class="mic-stage">
+            <div class="siri-halo" aria-hidden="true"></div>
+            <div class="mic-ring ring-1" aria-hidden="true"></div>
+            <div class="mic-ring ring-2" aria-hidden="true"></div>
+            <button
+              type="button"
+              class="mic-btn"
+              id="micBtn"
+              aria-label="Falar com o assistente Gemini"
+            >
+              <span class="mic-core" aria-hidden="true"></span>
+              <!-- Ícone Microfone (Idle) -->
+              <svg class="mic-icon icon-mic" viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" x2="12" y1="19" y2="22"></line>
+              </svg>
+
+              <!-- Ondas Animadas (Listening / Speaking) -->
+              <div class="voice-bars" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span>
+              </div>
+
+              <!-- Spinner (Thinking) -->
+              <div class="thinking-spinner" aria-hidden="true"></div>
+            </button>
+          </div>
+
+          <p class="assistant-status" id="assistantStatus">Toque no microfone para falar com o Gemini</p>
+
+          <!-- Sugestões Rápidas (1 toque) -->
+          <div class="quick-prompts" id="quickPrompts" aria-label="Comandos rápidos">
+            <button type="button" class="quick-chip" data-prompt="Faça um resumo curto do meu dia com base na minha agenda e no clima atual.">
+              <span class="chip-dot-color blue"></span>Resumo do dia
+            </button>
+            <button type="button" class="quick-chip" data-prompt="Como está o clima agora e vai chover hoje?">
+              <span class="chip-dot-color orange"></span>Como está o tempo?
+            </button>
+            <button type="button" class="quick-chip" data-prompt="Qual é o meu próximo compromisso hoje?">
+              <span class="chip-dot-color green"></span>Próximo evento
+            </button>
+          </div>
+
+          <!-- Cartão de Transcrição e Resposta -->
+          <div class="response-card hidden" id="responseCard" aria-live="polite">
+            <div class="response-header">
+              <span class="response-tag" id="responseTag">
+                <span class="gemini-spark" aria-hidden="true">✦</span> Gemini 2.5 Flash
+              </span>
+              <div class="response-actions">
+                <button type="button" class="mini-icon-btn" id="replayVoiceBtn" title="Ouvir novamente" aria-label="Ouvir resposta novamente">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+                  </svg>
+                </button>
+                <button type="button" class="mini-icon-btn" id="clearResponseBtn" title="Limpar conversa" aria-label="Limpar conversa">
+                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <p class="user-transcript hidden" id="userTranscript"></p>
+            <p class="assistant-reply" id="assistantReply"></p>
+          </div>
+
+          <!-- Entrada de Texto Alternativa estilo iOS Spotlight -->
+          <form class="text-fallback" id="textForm" autocomplete="off">
+            <input
+              type="text"
+              id="textInput"
+              class="text-input"
+              placeholder="Pergunte algo sobre sua agenda ou clima..."
+              aria-label="Digite uma pergunta para o assistente"
+            />
+            <button type="submit" class="send-btn" id="sendBtn" aria-label="Enviar pergunta">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 19V5"></path>
+                <path d="m5 12 7-7 7 7"></path>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <!-- Coluna Direita: Widgets iOS (Clima + Google Agenda) -->
+      <section class="widgets-column" aria-label="Widgets de Clima e Agenda">
+        <!-- Widget 1: Clima estilo Apple iOS Weather -->
+        <article class="ios-widget weather-widget" id="weatherWidget" data-weather-theme="clear-night">
+          <div class="weather-top-row">
+            <button type="button" class="weather-city-btn" id="weatherCityBtn" title="Trocar cidade do clima">
+              <span id="weatherCityName">Carregando clima...</span>
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true">
+                <path d="M21 3 3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z"/>
+              </svg>
+            </button>
+            <div class="weather-actions">
+              <button type="button" class="widget-pill-action" id="weatherGpsBtn" title="Usar minha localização GPS" aria-label="Usar localização GPS">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M12 2v3"></path>
+                  <path d="M12 19v3"></path>
+                  <path d="M2 12h3"></path>
+                  <path d="M19 12h3"></path>
+                </svg>
+                <span>GPS</span>
+              </button>
+              <button type="button" class="mini-icon-btn weather-icon-btn" id="refreshWeatherBtn" title="Atualizar clima" aria-label="Atualizar clima">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path>
+                  <path d="M21 3v5h-5"></path>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Busca rápida inline de cidade (oculta por padrão) -->
+          <form class="weather-city-form hidden" id="weatherCityForm" autocomplete="off">
+            <input
+              type="text"
+              id="weatherCityInput"
+              placeholder="Digite sua cidade (ex: Curitiba, Recife, Lisboa)..."
+              aria-label="Buscar cidade"
+            />
+            <button type="submit" class="weather-search-submit">Buscar</button>
+            <button type="button" class="weather-search-cancel" id="cancelCitySearchBtn" aria-label="Fechar busca">✕</button>
+          </form>
+
+          <div class="weather-main-row">
+            <div class="weather-temp-cluster">
+              <span class="weather-temp" id="weatherTemp">--°</span>
+              <div class="weather-cond-stack">
+                <span class="weather-condition" id="weatherCondition">Atualizando...</span>
+                <span class="weather-highlow" id="weatherHighLow">Máx --° · Mín --°</span>
+              </div>
+            </div>
+            <div class="weather-hero-icon" id="weatherHeroIcon" aria-hidden="true"></div>
+          </div>
+
+          <div class="weather-metrics-row">
+            <div class="weather-metric">
+              <span class="metric-label">Sensação</span>
+              <span class="metric-value" id="weatherFeelsLike">--°</span>
+            </div>
+            <div class="weather-metric">
+              <span class="metric-label">Umidade</span>
+              <span class="metric-value" id="weatherHumidity">--%</span>
+            </div>
+            <div class="weather-metric">
+              <span class="metric-label">Chuva</span>
+              <span class="metric-value" id="weatherRainChance">--%</span>
+            </div>
+            <div class="weather-metric">
+              <span class="metric-label">Vento</span>
+              <span class="metric-value" id="weatherWind">-- km/h</span>
+            </div>
+          </div>
+
+          <div class="weather-hourly-strip" id="weatherHourlyStrip" aria-label="Previsão por hora"></div>
+        </article>
+
+        <!-- Widget 2: Google Agenda estilo Apple iOS Calendar -->
+        <article class="ios-widget agenda-card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <div class="ios-cal-icon" aria-hidden="true">
+                <span class="ios-cal-month" id="iosCalMonth">NOV</span>
+                <span class="ios-cal-day" id="iosCalDay">23</span>
+              </div>
+              <div>
+                <h2 class="card-title">Agenda de Hoje</h2>
+                <span class="card-subtitle-small" id="agendaHeaderSub">Próximos 5 compromissos</span>
+              </div>
+              <span class="event-count-badge hidden" id="eventCountBadge">0</span>
+            </div>
+            <div class="card-actions">
+              <button type="button" class="mini-icon-btn hidden" id="refreshCalendarBtn" title="Atualizar eventos" aria-label="Atualizar eventos">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path>
+                  <path d="M21 3v5h-5"></path>
+                </svg>
+              </button>
+              <button type="button" class="mini-text-btn hidden" id="disconnectCalendarBtn" title="Desconectar agenda">
+                Sair
+              </button>
+            </div>
+          </div>
+
+          <!-- Estado: Não Conectado -->
+          <div class="agenda-connect-state" id="agendaConnectState">
+            <p class="empty-title">Conecte sua Google Agenda</p>
+            <p class="empty-subtitle">Veja os próximos 5 eventos de hoje e pergunte sobre seu dia ao Gemini por voz.</p>
+
+            <button type="button" class="google-connect-btn" id="connectCalendarBtn">
+              <svg class="google-g" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="#4285F4" d="M23.745 12.27c0-.79-.07-1.54-.19-2.27h-11.3v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"/>
+                <path fill="#34A853" d="M12.255 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96h-3.98v3.09C3.515 21.3 7.565 24 12.255 24z"/>
+                <path fill="#FBBC05" d="M5.525 14.29c-.25-.72-.38-1.49-.38-2.29s.14-1.57.38-2.29V6.62h-3.98a11.86 11.86 0 0 0 0 10.76l3.98-3.09z"/>
+                <path fill="#EA4335" d="M12.255 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C18.205 1.19 15.495 0 12.255 0c-4.69 0-8.74 2.7-10.71 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"/>
+              </svg>
+              <span>Conectar Google Agenda</span>
+            </button>
+
+            <button type="button" class="demo-link-btn" id="loadDemoBtn">
+              Visualizar com agenda de exemplo
+            </button>
+          </div>
+
+          <!-- Estado: Carregando -->
+          <div class="agenda-loading hidden" id="agendaLoading">
+            <div class="skeleton-item"></div>
+            <div class="skeleton-item"></div>
+            <div class="skeleton-item"></div>
+          </div>
+
+          <!-- Estado: Lista de Eventos -->
+          <ul class="events-list hidden" id="eventsList" aria-label="Próximos eventos de hoje"></ul>
+
+          <!-- Estado: Sem Eventos Restantes Hoje -->
+          <div class="agenda-empty-today hidden" id="agendaEmptyToday">
+            <div class="check-circle" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+            </div>
+            <p class="empty-title">Agenda livre hoje</p>
+            <p class="empty-subtitle">Nenhum compromisso restante para o resto do dia.</p>
+          </div>
+
+          <div class="agenda-footer hidden" id="agendaFooter">
+            <span id="agendaSyncMeta">Sincronizado agora</span>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal de Configurações Seguras (Estilo iOS Sheet) -->
+  <div class="modal-backdrop hidden" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsModalTitle">
+    <div class="modal-panel">
+      <div class="modal-header">
+        <div>
+          <h2 id="settingsModalTitle">Ajustes</h2>
+          <p class="modal-subtitle">Suas chaves ficam salvas apenas no <code>localStorage</code> deste dispositivo.</p>
+        </div>
+        <button type="button" class="icon-btn" id="closeSettingsBtn" aria-label="Fechar configurações">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <form id="settingsForm" class="modal-body" autocomplete="off">
+        <div class="field-group">
+          <label for="geminiKeyInput">GEMINI_API_KEY</label>
+          <div class="input-with-action">
+            <input
+              type="password"
+              id="geminiKeyInput"
+              placeholder="AIzaSy..."
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <button type="button" class="toggle-vis-btn" id="toggleGeminiKeyBtn" aria-label="Mostrar ou ocultar chave">
+              <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+          <span class="field-hint">Usada na API REST do modelo <code>gemini-2.5-flash</code>.</span>
+        </div>
+
+        <div class="field-group">
+          <label for="googleClientIdInput">Google OAuth Client ID</label>
+          <input
+            type="text"
+            id="googleClientIdInput"
+            placeholder="1234567890-abcdefg.apps.googleusercontent.com"
+            spellcheck="false"
+            autocomplete="off"
+          />
+          <span class="field-hint">Usado pelo Google Identity Services para leitura da Google Agenda.</span>
+        </div>
+
+        <div class="field-group">
+          <label for="settingsCityInput">Cidade do Clima (Opcional)</label>
+          <input
+            type="text"
+            id="settingsCityInput"
+            placeholder="Ex: São Paulo, Rio de Janeiro, Belo Horizonte..."
+            autocomplete="off"
+          />
+          <span class="field-hint">Deixe em branco para manter a cidade atual ou use o botão GPS no widget.</span>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="prefs-grid">
+          <div class="field-group">
+            <label for="voiceSelect">Voz do Assistente (pt-BR)</label>
+            <select id="voiceSelect">
+              <option value="">Automática (melhor voz pt-BR)</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label for="speechRateInput">Velocidade da Fala: <strong id="speechRateValue">1.05x</strong></label>
+            <input type="range" id="speechRateInput" min="0.8" max="1.4" step="0.05" value="1.05" />
+          </div>
+        </div>
+
+        <div class="toggles-row">
+          <label class="switch-label">
+            <input type="checkbox" id="format24hToggle" checked />
+            <span>Relógio 24h</span>
+          </label>
+          <label class="switch-label">
+            <input type="checkbox" id="showSecondsToggle" checked />
+            <span>Mostrar segundos</span>
+          </label>
+          <label class="switch-label">
+            <input type="checkbox" id="soundChimesToggle" checked />
+            <span>Sons de feedback</span>
+          </label>
+        </div>
+
+        <details class="setup-help">
+          <summary>Como configurar as credenciais?</summary>
+          <div class="setup-help-body">
+            <p><strong>1. GEMINI_API_KEY:</strong> Gere gratuitamente em <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer">Google AI Studio</a>.</p>
+            <p><strong>2. Google OAuth Client ID:</strong> No <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">Google Cloud Console</a>, ative a <em>Google Calendar API</em>, crie um <em>OAuth Client ID (Web application)</em> e adicione esta origem em <em>Authorized JavaScript origins</em>:</p>
+            <div class="origin-copy-box">
+              <code id="currentOriginCode"></code>
+              <button type="button" class="copy-origin-btn" id="copyOriginBtn">Copiar</button>
+            </div>
+          </div>
+        </details>
+
+        <div class="modal-footer">
+          <button type="button" class="danger-ghost-btn" id="clearKeysBtn">Limpar chaves</button>
+          <div class="modal-footer-right">
+            <button type="button" class="secondary-btn" id="cancelSettingsBtn">Cancelar</button>
+            <button type="submit" class="primary-btn">Salvar</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal de Guia Tela Cheia no iPhone Safari -->
+  <div class="modal-backdrop hidden" id="iosFullscreenModal" role="dialog" aria-modal="true" aria-labelledby="iosFullscreenTitle">
+    <div class="modal-panel ios-guide-panel">
+      <div class="modal-header">
+        <div>
+          <h2 id="iosFullscreenTitle">Tela cheia no Safari do iPhone</h2>
+          <p class="modal-subtitle">A Apple bloqueia o botão de tela cheia dentro de abas comuns do Safari no iOS. Para abrir 100% sem barras:</p>
+        </div>
+        <button type="button" class="icon-btn" id="closeIosGuideBtn" aria-label="Fechar guia">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <ol class="ios-steps-list">
+          <li>
+            <span class="ios-step-num">1</span>
+            <div>
+              <strong>Toque em Compartilhar</strong> na barra inferior do Safari (ícone quadrado com seta para cima <code>↑</code>).
+            </div>
+          </li>
+          <li>
+            <span class="ios-step-num">2</span>
+            <div>
+              Role para baixo e toque em <strong>Adicionar à Tela de Início</strong>. Certifique-se de deixar ativada a opção <strong>“Abrir como App da Web”</strong>.
+            </div>
+          </li>
+          <li>
+            <span class="ios-step-num">3</span>
+            <div>
+              Feche o Safari e abra o <strong>Smart Dock</strong> pelo ícone criado na Tela de Início — ele abrirá em <strong>tela cheia real</strong>.
+            </div>
+          </li>
+        </ol>
+        <p class="ios-extra-tip">
+          <strong>Dica dentro da aba do Safari:</strong> toque no ícone da barra de endereço (ou <code>AA</code>) e escolha <em>Ocultar Barra de Ferramentas</em>.
+        </p>
+        <div class="modal-footer" style="justify-content: flex-end;">
+          <button type="button" class="primary-btn" id="okIosGuideBtn">Entendi</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notificações Toast -->
+  <div class="toast-container" id="toastContainer" aria-live="polite" aria-atomic="true"></div>
+
+  <script src="app.js" defer></script>
+</body>
+</html>
