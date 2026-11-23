@@ -334,24 +334,26 @@ body[data-state="speaking"] .orb-1 {
 }
 
 /* ==========================================================================
-   Bento Grid Principal
+   Bento Grid Principal (Desktop: Sem Scroll + Coluna Direita Mais Estreita)
    ========================================================================== */
 .dock-grid {
   flex: 1;
+  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(350px, 0.92fr);
-  gap: 24px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 360px);
+  gap: 22px;
+  align-items: stretch;
 }
 
 .hero-column {
+  min-height: 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   text-align: center;
-  gap: 24px;
-  padding: 8px 4px;
+  gap: 18px;
+  padding: 4px 4px;
 }
 
 /* ==========================================================================
@@ -814,37 +816,40 @@ body[data-state="thinking"] .thinking-spinner {
 }
 
 /* ==========================================================================
-   Coluna Direita: Widgets Apple iOS (Clima + Agenda)
+   Coluna Direita: Widgets Apple iOS Compactos (Clima + Agenda)
    ========================================================================== */
 .widgets-column {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
   width: 100%;
+  min-height: 0;
+  justify-content: center;
 }
 
 .ios-widget {
   width: 100%;
-  border-radius: var(--radius-widget);
+  border-radius: 24px;
   background: var(--ios-card);
   border: 1px solid var(--border-glass);
   backdrop-filter: blur(38px) saturate(190%);
   -webkit-backdrop-filter: blur(38px) saturate(190%);
   box-shadow:
-    0 22px 54px rgba(0, 0, 0, 0.52),
+    0 20px 48px rgba(0, 0, 0, 0.52),
     inset 0 1px 0 var(--border-specular);
   overflow: hidden;
 }
 
 /* ==========================================================================
-   Widget 1: Apple iOS Weather Widget
+   Widget 1: Apple iOS Weather Widget (Estreito & Completo)
    ========================================================================== */
 .weather-widget {
   position: relative;
-  padding: 18px 20px 16px;
+  padding: 13px 15px 12px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 9px;
+  flex-shrink: 0;
   transition: background 600ms ease;
 }
 
@@ -983,13 +988,13 @@ body[data-state="thinking"] .thinking-spinner {
 .weather-temp-cluster {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 11px;
 }
 
 .weather-temp {
   font-family: var(--font-rounded);
-  font-size: clamp(2.8rem, 4.6vw, 3.6rem);
-  font-weight: 400;
+  font-size: clamp(2.2rem, 3.6vw, 2.85rem);
+  font-weight: 500;
   line-height: 1;
   letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
@@ -999,38 +1004,43 @@ body[data-state="thinking"] .thinking-spinner {
 .weather-cond-stack {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
 }
 
 .weather-condition {
-  font-size: 0.96rem;
+  font-size: 0.88rem;
   font-weight: 600;
   color: #ffffff;
 }
 
 .weather-highlow {
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.78);
   font-variant-numeric: tabular-nums;
 }
 
 .weather-hero-icon {
-  width: 62px;
-  height: 62px;
+  width: 46px;
+  height: 46px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  filter: drop-shadow(0 8px 18px rgba(0, 0, 0, 0.25));
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.25));
+}
+
+.weather-hero-icon svg {
+  width: 100%;
+  height: 100%;
 }
 
 .weather-metrics-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 16px;
+  gap: 4px;
+  padding: 7px 8px;
+  border-radius: 13px;
   background: rgba(0, 0, 0, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -1038,20 +1048,20 @@ body[data-state="thinking"] .thinking-spinner {
 .weather-metric {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   text-align: center;
 }
 
 .metric-label {
-  font-size: 0.68rem;
+  font-size: 0.62rem;
   font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   color: rgba(255, 255, 255, 0.62);
 }
 
 .metric-value {
-  font-size: 0.86rem;
+  font-size: 0.78rem;
   font-weight: 600;
   color: #ffffff;
   font-variant-numeric: tabular-nums;
@@ -1060,58 +1070,64 @@ body[data-state="thinking"] .thinking-spinner {
 .weather-hourly-strip {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  padding-top: 2px;
+  gap: 6px;
 }
 
 .hourly-slot {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  padding: 8px 4px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.08);
+  gap: 3px;
+  padding: 6px 3px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.09);
   font-variant-numeric: tabular-nums;
 }
 
 .hourly-time {
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 600;
   color: rgba(255, 255, 255, 0.78);
 }
 
 .hourly-icon {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
+.hourly-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
 .hourly-temp {
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: #ffffff;
 }
 
 /* ==========================================================================
-   Widget 2: Apple iOS Calendar Widget
+   Widget 2: Apple iOS Calendar Widget (Estreito & Compacto)
    ========================================================================== */
 .agenda-card {
   display: flex;
   flex-direction: column;
-  min-height: 290px;
-  max-height: 410px;
-  padding: 18px 20px;
+  flex: 1;
+  min-height: 220px;
+  max-height: 360px;
+  padding: 13px 15px;
 }
 
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
 }
 
 .card-title-group {
@@ -1324,22 +1340,26 @@ body[data-state="thinking"] .thinking-spinner {
   margin: 0;
   padding: 0;
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 6px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
 
 .event-item {
   --event-accent: var(--ios-blue);
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 11px 13px;
-  border-radius: var(--radius-md);
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.07);
   transition: background var(--transition-fast), border-color var(--transition-fast);
+  flex-shrink: 0;
 }
 
 .event-item:nth-child(5n + 1) { --event-accent: var(--ios-blue); }
@@ -1359,32 +1379,34 @@ body[data-state="thinking"] .thinking-spinner {
 }
 
 .event-accent-bar {
-  width: 4px;
+  width: 3.5px;
   align-self: stretch;
   border-radius: 4px;
   background: var(--event-accent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--event-accent) 45%, transparent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--event-accent) 45%, transparent);
   flex-shrink: 0;
 }
 
 .event-time-col {
-  min-width: 58px;
+  min-width: 46px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
   font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
 
 .event-start {
-  font-size: 0.88rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--label-primary);
+  line-height: 1.15;
 }
 
 .event-end {
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   color: var(--label-tertiary);
+  line-height: 1.1;
 }
 
 .event-info-col {
@@ -1392,18 +1414,18 @@ body[data-state="thinking"] .thinking-spinner {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 1px;
 }
 
 .event-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
 }
 
 .event-title {
-  font-size: 0.91rem;
+  font-size: 0.83rem;
   font-weight: 600;
   color: var(--label-primary);
   overflow: hidden;
@@ -1412,9 +1434,9 @@ body[data-state="thinking"] .thinking-spinner {
 }
 
 .event-status-tag {
-  font-size: 0.69rem;
+  font-size: 0.64rem;
   font-weight: 700;
-  padding: 2px 8px;
+  padding: 2px 7px;
   border-radius: var(--radius-pill);
   flex-shrink: 0;
 }
@@ -1430,7 +1452,7 @@ body[data-state="thinking"] .thinking-spinner {
 }
 
 .event-location {
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   color: var(--label-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1438,11 +1460,12 @@ body[data-state="thinking"] .thinking-spinner {
 }
 
 .agenda-footer {
-  margin-top: 10px;
-  padding-top: 9px;
+  margin-top: 8px;
+  padding-top: 7px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 0.73rem;
+  font-size: 0.69rem;
   color: var(--label-tertiary);
+  flex-shrink: 0;
 }
 
 /* ==========================================================================
@@ -1874,17 +1897,44 @@ body[data-state="thinking"] .thinking-spinner {
 }
 
 /* ==========================================================================
-   Responsividade: iPhone Retrato & Modo StandBy Paisagem
+   Responsividade: Desktop Sem Scroll, Retrato & Celular Horizontal (StandBy)
    ========================================================================== */
-@media (max-width: 980px) {
+
+/* Desktop: tela única sem rolagem vertical */
+@media (min-width: 920px) and (min-height: 541px) {
+  html,
+  body {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-shell {
+    height: 100dvh;
+    overflow: hidden;
+    gap: 14px;
+  }
+
+  .widgets-column {
+    height: 100%;
+    max-height: calc(100dvh - 84px);
+  }
+
+  .agenda-card {
+    max-height: none;
+    min-height: 0;
+  }
+}
+
+/* Tablet / Celular em Modo Retrato */
+@media (max-width: 919px) and (orientation: portrait) {
   .dock-grid {
     grid-template-columns: 1fr;
-    gap: 20px;
+    gap: 16px;
     align-items: start;
   }
 
   .hero-column {
-    gap: 18px;
+    gap: 16px;
     padding-top: 2px;
   }
 
@@ -1893,11 +1943,11 @@ body[data-state="thinking"] .thinking-spinner {
   }
 }
 
-@media (max-width: 560px) {
+@media (max-width: 560px) and (orientation: portrait) {
   .app-shell {
     padding-right: calc(14px + var(--safe-right));
     padding-left: calc(14px + var(--safe-left));
-    gap: 14px;
+    gap: 12px;
   }
 
   .wake-label {
@@ -1914,26 +1964,22 @@ body[data-state="thinking"] .thinking-spinner {
   }
 
   .clock-time {
-    font-size: clamp(4.2rem, 21vw, 5.6rem);
+    font-size: clamp(4.1rem, 20vw, 5.5rem);
   }
 
   .date-pill {
-    font-size: 0.8rem;
-    padding: 5px 12px;
+    font-size: 0.78rem;
+    padding: 5px 11px;
   }
 
   .mic-stage {
-    width: 122px;
-    height: 122px;
+    width: 116px;
+    height: 116px;
   }
 
   .mic-btn {
-    width: 92px;
-    height: 92px;
-  }
-
-  .weather-widget {
-    padding: 16px;
+    width: 88px;
+    height: 88px;
   }
 
   .prefs-grid {
@@ -1950,57 +1996,488 @@ body[data-state="thinking"] .thinking-spinner {
   }
 }
 
-/* iPhone em Modo Paisagem (StandBy Dock) */
-@media (max-height: 490px) and (orientation: landscape) {
+/* ==========================================================================
+   CELULAR NA HORIZONTAL (Apple StandBy Dock — 100% Sem Rolagem & Sem Perdas)
+   Cobre iPhone SE/Mini/13/14/15/16/Pro Max e Android em modo paisagem
+   ========================================================================== */
+@media (orientation: landscape) and (max-height: 540px) {
+  html,
+  body {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
   .app-shell {
-    gap: 10px;
-    padding-top: calc(8px + var(--safe-top));
-    padding-bottom: calc(10px + var(--safe-bottom));
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    gap: 6px;
+    padding-top: calc(6px + var(--safe-top));
+    padding-right: calc(12px + var(--safe-right));
+    padding-bottom: calc(6px + var(--safe-bottom));
+    padding-left: calc(12px + var(--safe-left));
   }
 
-  .dock-grid {
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
-    align-items: stretch;
+  /* Barra superior ultra-compacta */
+  .top-bar {
+    min-height: 30px;
+    gap: 8px;
+    flex-shrink: 0;
   }
 
-  .hero-column {
-    gap: 10px;
-    padding: 0;
+  .status-pill,
+  .audio-unlock-pill,
+  .pill-btn {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 0.72rem;
+    gap: 6px;
   }
 
-  .clock-time {
-    font-size: clamp(3.4rem, 13vh, 4.9rem);
+  .brand-name {
+    font-size: 0.74rem;
   }
 
-  .mic-stage {
-    width: 92px;
-    height: 92px;
-  }
-
-  .mic-btn {
-    width: 72px;
-    height: 72px;
-  }
-
-  .quick-prompts,
-  .text-fallback,
-  .weather-hourly-strip {
+  .wake-label {
     display: none;
   }
 
-  .widgets-column {
-    gap: 10px;
+  .wake-label-short {
+    display: inline;
   }
 
+  .icon-btn {
+    width: 28px;
+    height: 28px;
+  }
+
+  .icon-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .config-badge {
+    top: 4px;
+    right: 4px;
+    width: 6px;
+    height: 6px;
+  }
+
+  /* Grade horizontal: Esquerda ampla (Relógio+Voz) | Direita estreita (Clima+Agenda) */
+  .dock-grid {
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1.25fr) minmax(248px, 310px);
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  /* Coluna Esquerda: Relógio + Orb de Voz sem scroll */
+  .hero-column {
+    min-height: 0;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 2px 0;
+    overflow: hidden;
+  }
+
+  .clock-block {
+    gap: 3px;
+  }
+
+  .date-pill {
+    padding: 3px 10px;
+    font-size: 0.72rem;
+    gap: 6px;
+  }
+
+  .clock-display {
+    margin-top: 2px;
+  }
+
+  .clock-time {
+    font-size: clamp(2.85rem, 16vh, 4.4rem);
+  }
+
+  .clock-side-meta {
+    margin-left: 6px;
+    gap: 1px;
+  }
+
+  .clock-seconds {
+    font-size: clamp(1rem, 4.5vh, 1.45rem);
+  }
+
+  .clock-ampm {
+    font-size: 0.7rem;
+  }
+
+  .next-event-chip {
+    margin-top: 2px;
+    padding: 3px 10px;
+    font-size: 0.7rem;
+    gap: 6px;
+  }
+
+  .assistant-block {
+    gap: 6px;
+    max-width: 100%;
+    min-height: 0;
+  }
+
+  .mic-stage {
+    width: 68px;
+    height: 68px;
+  }
+
+  .siri-halo {
+    inset: 3px;
+    filter: blur(12px);
+  }
+
+  .mic-btn {
+    width: 54px;
+    height: 54px;
+  }
+
+  .mic-icon {
+    width: 22px;
+    height: 22px;
+  }
+
+  .voice-bars {
+    height: 22px !important;
+    gap: 3px !important;
+  }
+
+  .voice-bars span {
+    width: 3px;
+  }
+
+  .thinking-spinner {
+    width: 22px !important;
+    height: 22px !important;
+  }
+
+  .assistant-status {
+    font-size: 0.72rem;
+  }
+
+  .quick-prompts {
+    gap: 5px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: none;
+  }
+
+  .quick-prompts::-webkit-scrollbar {
+    display: none;
+  }
+
+  .quick-chip {
+    padding: 4px 9px;
+    font-size: 0.68rem;
+    gap: 5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .chip-dot-color {
+    width: 5px;
+    height: 5px;
+  }
+
+  .response-card {
+    padding: 7px 10px;
+    border-radius: 14px;
+  }
+
+  .response-header {
+    margin-bottom: 3px;
+  }
+
+  .response-tag {
+    font-size: 0.64rem;
+  }
+
+  .user-transcript {
+    margin: 0 0 3px;
+    font-size: 0.7rem;
+  }
+
+  .assistant-reply {
+    font-size: 0.76rem;
+    line-height: 1.35;
+    max-height: 54px;
+  }
+
+  .text-fallback {
+    padding: 2px 4px 2px 11px;
+  }
+
+  .text-input {
+    font-size: 0.74rem;
+    padding: 4px 0;
+  }
+
+  .send-btn {
+    width: 24px;
+    height: 24px;
+  }
+
+  .send-btn svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  /* Coluna Direita: Estreita e ultra-organizada (Clima + Agenda com 100% dos dados) */
+  .widgets-column {
+    min-height: 0;
+    height: 100%;
+    gap: 7px;
+    justify-content: flex-start;
+  }
+
+  .ios-widget {
+    border-radius: 18px;
+  }
+
+  /* Widget Clima super compacto mantendo TODAS as informações */
   .weather-widget {
-    padding: 12px 14px;
+    padding: 8px 10px;
+    gap: 5px;
+  }
+
+  .weather-city-btn {
+    font-size: 0.78rem;
+    padding: 0;
+    gap: 4px;
+  }
+
+  .widget-pill-action {
+    height: 21px;
+    padding: 0 7px;
+    font-size: 0.64rem;
+    gap: 3px;
+  }
+
+  .widget-pill-action svg {
+    width: 11px;
+    height: 11px;
+  }
+
+  .mini-icon-btn {
+    width: 22px;
+    height: 22px;
+  }
+
+  .mini-icon-btn svg {
+    width: 12px;
+    height: 12px;
+  }
+
+  .weather-temp-cluster {
     gap: 8px;
   }
 
+  .weather-temp {
+    font-size: 1.75rem;
+  }
+
+  .weather-condition {
+    font-size: 0.74rem;
+  }
+
+  .weather-highlow {
+    font-size: 0.66rem;
+  }
+
+  .weather-hero-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .weather-metrics-row {
+    padding: 4px 5px;
+    border-radius: 10px;
+    gap: 2px;
+  }
+
+  .metric-label {
+    font-size: 0.54rem;
+  }
+
+  .metric-value {
+    font-size: 0.68rem;
+  }
+
+  /* Previsão por hora em linha compacta (preservada sem perder dados!) */
+  .weather-hourly-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 4px;
+  }
+
+  .hourly-slot {
+    flex-direction: row;
+    justify-content: center;
+    padding: 3px 3px;
+    gap: 3px;
+    border-radius: 8px;
+  }
+
+  .hourly-time {
+    font-size: 0.6rem;
+  }
+
+  .hourly-icon {
+    width: 13px;
+    height: 13px;
+  }
+
+  .hourly-temp {
+    font-size: 0.66rem;
+  }
+
+  /* Widget Agenda preenche o espaço restante sem scroll da página */
   .agenda-card {
+    flex: 1;
     min-height: 0;
-    max-height: 220px;
-    padding: 12px 14px;
+    max-height: none;
+    padding: 8px 10px;
+  }
+
+  .card-header {
+    margin-bottom: 6px;
+  }
+
+  .card-title-group {
+    gap: 7px;
+  }
+
+  .ios-cal-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+  }
+
+  .ios-cal-month {
+    font-size: 0.44rem;
+    line-height: 1.35;
+  }
+
+  .ios-cal-day {
+    font-size: 0.72rem;
+  }
+
+  .card-title {
+    font-size: 0.8rem;
+  }
+
+  .card-subtitle-small {
+    display: none;
+  }
+
+  .event-count-badge {
+    font-size: 0.64rem;
+    padding: 1px 6px;
+  }
+
+  .mini-text-btn {
+    padding: 3px 7px;
+    font-size: 0.66rem;
+  }
+
+  .agenda-connect-state,
+  .agenda-empty-today {
+    padding: 4px;
+    gap: 5px;
+  }
+
+  .empty-title {
+    font-size: 0.8rem;
+  }
+
+  .empty-subtitle {
+    font-size: 0.69rem;
+    line-height: 1.3;
+  }
+
+  .google-connect-btn {
+    margin-top: 2px;
+    padding: 7px 13px;
+    font-size: 0.74rem;
+    gap: 7px;
+  }
+
+  .google-connect-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .demo-link-btn {
+    font-size: 0.68rem;
+    padding: 2px 6px;
+  }
+
+  .events-list {
+    gap: 3px;
+  }
+
+  .event-item {
+    padding: 3px 7px;
+    gap: 6px;
+    border-radius: 8px;
+  }
+
+  .event-accent-bar {
+    width: 3px;
+  }
+
+  .event-time-col {
+    min-width: 34px;
+  }
+
+  .event-start {
+    font-size: 0.67rem;
+  }
+
+  .event-end {
+    display: none;
+  }
+
+  .event-info-col {
+    flex-direction: row;
+    align-items: center;
+    gap: 5px;
+  }
+
+  .event-title-row {
+    flex: 1;
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .event-title {
+    font-size: 0.7rem;
+  }
+
+  .event-location {
+    font-size: 0.61rem;
+    max-width: 72px;
+    opacity: 0.72;
+    flex-shrink: 1;
+  }
+
+  .event-status-tag {
+    font-size: 0.56rem;
+    padding: 1px 5px;
+  }
+
+  .agenda-footer {
+    margin-top: 4px;
+    padding-top: 3px;
+    font-size: 0.6rem;
   }
 }
