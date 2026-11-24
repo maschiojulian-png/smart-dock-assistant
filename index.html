@@ -23,6 +23,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
 
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="expanded-ui.css" />
 
   <!-- Google Identity Services (OAuth 2.0 Client-Side) -->
   <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -163,7 +164,19 @@
             </button>
           </div>
 
-          <p class="assistant-status" id="assistantStatus">Toque no microfone para falar com o Gemini</p>
+          <div class="assistant-status-row">
+            <p class="assistant-status" id="assistantStatus">Toque no microfone para falar com o Gemini</p>
+            <button
+              type="button"
+              class="fluid-mode-pill"
+              id="fluidModeBtn"
+              aria-pressed="true"
+              title="Reabrir microfone automaticamente após a IA responder"
+            >
+              <span class="fluid-dot" aria-hidden="true"></span>
+              <span>Conversa contínua</span>
+            </button>
+          </div>
 
           <!-- Sugestões Rápidas (1 toque) -->
           <div class="quick-prompts" id="quickPrompts" aria-label="Comandos rápidos">
@@ -251,6 +264,14 @@
                   <path d="M21 3v5h-5"></path>
                 </svg>
               </button>
+              <button type="button" class="mini-icon-btn weather-icon-btn" id="expandWeatherBtn" title="Abrir detalhes e gráficos do clima" aria-label="Expandir clima">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="15 3 21 3 21 9"></polyline>
+                  <polyline points="9 21 3 21 3 15"></polyline>
+                  <line x1="21" y1="3" x2="14" y2="10"></line>
+                  <line x1="3" y1="21" x2="10" y2="14"></line>
+                </svg>
+              </button>
             </div>
           </div>
 
@@ -300,7 +321,7 @@
         </article>
 
         <!-- Widget 2: Google Agenda estilo Apple iOS Calendar -->
-        <article class="ios-widget agenda-card">
+        <article class="ios-widget agenda-card" id="agendaWidget">
           <div class="card-header">
             <div class="card-title-group">
               <div class="ios-cal-icon" aria-hidden="true">
@@ -308,16 +329,28 @@
                 <span class="ios-cal-day" id="iosCalDay">23</span>
               </div>
               <div>
-                <h2 class="card-title">Agenda de Hoje</h2>
-                <span class="card-subtitle-small" id="agendaHeaderSub">Próximos 5 compromissos</span>
+                <h2 class="card-title" id="agendaCardTitle">Agenda</h2>
+                <span class="card-subtitle-small" id="agendaHeaderSub">Hoje · toque para expandir</span>
               </div>
               <span class="event-count-badge hidden" id="eventCountBadge">0</span>
             </div>
             <div class="card-actions">
+              <div class="segmented-control" id="agendaRangeSwitch" role="tablist" aria-label="Visualização da agenda">
+                <button type="button" class="seg-btn active" data-range="day" role="tab" aria-selected="true">Dia</button>
+                <button type="button" class="seg-btn" data-range="week" role="tab" aria-selected="false">Semana</button>
+              </div>
               <button type="button" class="mini-icon-btn hidden" id="refreshCalendarBtn" title="Atualizar eventos" aria-label="Atualizar eventos">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path>
                   <path d="M21 3v5h-5"></path>
+                </svg>
+              </button>
+              <button type="button" class="mini-icon-btn" id="expandAgendaBtn" title="Abrir agenda em tela grande" aria-label="Expandir agenda">
+                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="15 3 21 3 21 9"></polyline>
+                  <polyline points="9 21 3 21 3 15"></polyline>
+                  <line x1="21" y1="3" x2="14" y2="10"></line>
+                  <line x1="3" y1="21" x2="10" y2="14"></line>
                 </svg>
               </button>
               <button type="button" class="mini-text-btn hidden" id="disconnectCalendarBtn" title="Desconectar agenda">
@@ -329,7 +362,7 @@
           <!-- Estado: Não Conectado -->
           <div class="agenda-connect-state" id="agendaConnectState">
             <p class="empty-title">Conecte sua Google Agenda</p>
-            <p class="empty-subtitle">Veja os próximos 5 eventos de hoje e pergunte sobre seu dia ao Gemini por voz.</p>
+            <p class="empty-subtitle">Veja os próximos eventos de hoje e da semana e peça ao Gemini para criar compromissos por voz.</p>
 
             <button type="button" class="google-connect-btn" id="connectCalendarBtn">
               <svg class="google-g" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -354,7 +387,7 @@
           </div>
 
           <!-- Estado: Lista de Eventos -->
-          <ul class="events-list hidden" id="eventsList" aria-label="Próximos eventos de hoje"></ul>
+          <ul class="events-list hidden" id="eventsList" aria-label="Próximos eventos"></ul>
 
           <!-- Estado: Sem Eventos Restantes Hoje -->
           <div class="agenda-empty-today hidden" id="agendaEmptyToday">
@@ -363,8 +396,8 @@
                 <polyline points="20 6 9 17 4 12"></polyline>
               </svg>
             </div>
-            <p class="empty-title">Agenda livre hoje</p>
-            <p class="empty-subtitle">Nenhum compromisso restante para o resto do dia.</p>
+            <p class="empty-title">Agenda livre</p>
+            <p class="empty-subtitle">Nenhum compromisso restante neste período.</p>
           </div>
 
           <div class="agenda-footer hidden" id="agendaFooter">
@@ -431,7 +464,7 @@
             spellcheck="false"
             autocomplete="off"
           />
-          <span class="field-hint">Usado pelo Google Identity Services para leitura da Google Agenda.</span>
+          <span class="field-hint">Usado pelo Google Identity Services para leitura e criação de eventos na Google Agenda.</span>
         </div>
 
         <div class="field-group">
@@ -565,6 +598,103 @@
         <div class="modal-footer" style="justify-content: flex-end;">
           <button type="button" class="primary-btn" id="okIosGuideBtn">Entendi</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Expandido: Agenda da Semana & Criação de Eventos -->
+  <div class="modal-backdrop hidden" id="agendaExpandedModal" role="dialog" aria-modal="true" aria-labelledby="agendaModalTitle">
+    <div class="modal-panel expanded-modal-panel">
+      <div class="modal-header expanded-modal-header">
+        <div class="expanded-title-cluster">
+          <div class="ios-cal-icon" aria-hidden="true">
+            <span class="ios-cal-month" id="modalCalMonth">NOV</span>
+            <span class="ios-cal-day" id="modalCalDay">24</span>
+          </div>
+          <div>
+            <h2 id="agendaModalTitle">Agenda da Semana</h2>
+            <p class="modal-subtitle" id="agendaModalSubtitle">Próximos 7 dias · diga à IA ou clique em + Novo evento</p>
+          </div>
+        </div>
+        <div class="expanded-header-actions">
+          <div class="segmented-control" id="modalAgendaRangeSwitch" role="tablist" aria-label="Visualização expandida">
+            <button type="button" class="seg-btn" data-range="day" role="tab" aria-selected="false">Hoje</button>
+            <button type="button" class="seg-btn active" data-range="week" role="tab" aria-selected="true">Semana</button>
+          </div>
+          <button type="button" class="primary-btn compact-btn" id="toggleNewEventFormBtn">+ Novo evento</button>
+          <button type="button" class="icon-btn" id="closeAgendaModalBtn" aria-label="Fechar agenda expandida">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-body expanded-modal-body">
+        <!-- Formulário rápido de novo evento (oculto por padrão) -->
+        <form class="new-event-form hidden" id="newEventForm" autocomplete="off">
+          <div class="new-event-grid">
+            <div class="field-group">
+              <label for="newEventTitle">Título do evento</label>
+              <input type="text" id="newEventTitle" placeholder="Ex: Reunião de projeto, Dentista..." required />
+            </div>
+            <div class="field-group">
+              <label for="newEventLocation">Local (opcional)</label>
+              <input type="text" id="newEventLocation" placeholder="Ex: Google Meet, Escritório..." />
+            </div>
+            <div class="field-group">
+              <label for="newEventDate">Data</label>
+              <input type="date" id="newEventDate" required />
+            </div>
+            <div class="field-group new-event-times">
+              <div>
+                <label for="newEventStart">Início</label>
+                <input type="time" id="newEventStart" value="09:00" required />
+              </div>
+              <div>
+                <label for="newEventEnd">Fim</label>
+                <input type="time" id="newEventEnd" value="10:00" required />
+              </div>
+            </div>
+          </div>
+          <div class="new-event-actions">
+            <button type="button" class="secondary-btn compact-btn" id="cancelNewEventBtn">Cancelar</button>
+            <button type="submit" class="primary-btn compact-btn" id="submitNewEventBtn">Adicionar à Agenda</button>
+          </div>
+        </form>
+
+        <div id="agendaExpandedContent" class="week-schedule-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Expandido: Clima Completo + Gráficos 24h + 7 Dias -->
+  <div class="modal-backdrop hidden" id="weatherExpandedModal" role="dialog" aria-modal="true" aria-labelledby="weatherModalTitle">
+    <div class="modal-panel expanded-modal-panel weather-modal-panel" id="weatherModalPanel" data-weather-theme="clear-night">
+      <div class="modal-header expanded-modal-header">
+        <div>
+          <h2 id="weatherModalTitle">Previsão do Tempo</h2>
+          <p class="modal-subtitle" id="weatherModalSubtitle">Temperatura por hora, chance de chuva e próximos 7 dias</p>
+        </div>
+        <div class="expanded-header-actions">
+          <button type="button" class="mini-icon-btn weather-icon-btn" id="modalRefreshWeatherBtn" title="Atualizar clima" aria-label="Atualizar clima">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36L21 8"></path>
+              <path d="M21 3v5h-5"></path>
+            </svg>
+          </button>
+          <button type="button" class="icon-btn" id="closeWeatherModalBtn" aria-label="Fechar detalhes do clima">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="modal-body expanded-modal-body" id="weatherExpandedContent">
+        <!-- Preenchido dinamicamente pelo app.js -->
       </div>
     </div>
   </div>

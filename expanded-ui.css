@@ -1,0 +1,511 @@
+/* ==========================================================================
+   Conversa Fluida, Alternador Dia/Semana e Modais Expandidos (Clima & Agenda)
+   ========================================================================== */
+.assistant-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.fluid-mode-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--label-tertiary);
+  font-size: 0.72rem;
+  font-weight: 500;
+  transition: all var(--transition-fast);
+}
+
+.fluid-mode-pill:hover {
+  background: rgba(255, 255, 255, 0.11);
+  color: var(--label-primary);
+}
+
+.fluid-mode-pill[aria-pressed="true"] {
+  background: rgba(76, 139, 245, 0.16);
+  border-color: rgba(76, 139, 245, 0.38);
+  color: #b7d4ff;
+}
+
+.fluid-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.45);
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.fluid-mode-pill[aria-pressed="true"] .fluid-dot {
+  background: var(--ios-blue);
+  box-shadow: 0 0 8px rgba(76, 139, 245, 0.85);
+}
+
+/* Widgets clicáveis para abrir em tela grande */
+.weather-widget,
+.agenda-card {
+  cursor: pointer;
+}
+
+.weather-widget:hover,
+.agenda-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+/* Segmented Control estilo Apple iOS (Dia / Semana) */
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  gap: 2px;
+}
+
+.seg-btn {
+  padding: 4px 9px;
+  border-radius: var(--radius-pill);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--label-secondary);
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.seg-btn:hover {
+  color: var(--label-primary);
+}
+
+.seg-btn.active {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
+}
+
+/* Divisória de dia na visualização de Semana (widget compacto) */
+.event-day-divider {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ios-blue);
+  padding: 4px 4px 1px;
+  margin-top: 2px;
+  list-style: none;
+}
+
+.event-day-divider:first-child {
+  margin-top: 0;
+  padding-top: 0;
+}
+
+/* Modais Expandidos (Clima e Agenda em Tela Grande) */
+.expanded-modal-panel {
+  max-width: min(940px, 95vw);
+  width: 100%;
+  max-height: 90dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: rgba(18, 20, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.expanded-modal-header {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.expanded-title-cluster {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.expanded-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.compact-btn {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 0.8rem;
+}
+
+.expanded-modal-body {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  gap: 16px;
+}
+
+/* Formulário de Novo Evento na Agenda Expandida */
+.new-event-form {
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.new-event-grid {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 10px 12px;
+}
+
+.new-event-grid input[type="date"],
+.new-event-grid input[type="time"] {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: #2c2c2e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--label-primary);
+  font-size: 0.86rem;
+  outline: none;
+  color-scheme: dark;
+}
+
+.new-event-grid input[type="text"] {
+  height: 40px;
+}
+
+.new-event-times {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.new-event-times > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.new-event-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Grade de Semana Expandida (7 Dias) */
+.week-schedule-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.week-days-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+}
+
+.week-day-card {
+  background: rgba(255, 255, 255, 0.038);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.week-day-card.is-today {
+  border-color: rgba(76, 139, 245, 0.42);
+  background: rgba(76, 139, 245, 0.07);
+}
+
+.week-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.week-day-name {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--label-primary);
+}
+
+.week-day-card.is-today .week-day-name {
+  color: #8cc0ff;
+}
+
+.week-day-count {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--label-tertiary);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.week-day-empty {
+  font-size: 0.78rem;
+  color: var(--label-tertiary);
+  padding: 8px 0;
+  margin: 0;
+}
+
+/* Modal Expandido de Clima (Gráficos SVG + 24h + 7 Dias) */
+.weather-modal-panel[data-weather-theme="clear-day"] {
+  background: linear-gradient(165deg, rgba(24, 34, 52, 0.97) 0%, rgba(14, 17, 24, 0.98) 65%);
+}
+
+.weather-modal-panel[data-weather-theme="rain"],
+.weather-modal-panel[data-weather-theme="storm"] {
+  background: linear-gradient(165deg, rgba(20, 29, 40, 0.97) 0%, rgba(12, 15, 21, 0.98) 65%);
+}
+
+.weather-exp-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  flex-wrap: wrap;
+}
+
+.weather-exp-hero-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.weather-exp-temp {
+  font-family: var(--font-rounded);
+  font-size: clamp(3rem, 6vw, 4.2rem);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: #ffffff;
+}
+
+.weather-exp-cond {
+  font-size: 1.08rem;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.weather-exp-range {
+  font-size: 0.84rem;
+  color: var(--label-secondary);
+  margin-top: 2px;
+}
+
+.weather-exp-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.weather-exp-metric-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 15px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.weather-exp-metric-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--label-tertiary);
+  font-weight: 600;
+}
+
+.weather-exp-metric-val {
+  font-size: 1.02rem;
+  font-weight: 600;
+  color: var(--label-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.weather-chart-card {
+  background: rgba(255, 255, 255, 0.038);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.weather-chart-title {
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--label-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.weather-chart-sub {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--label-tertiary);
+}
+
+.weather-svg-chart {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+/* Faixa 24h rolável */
+.weather-24h-scroll {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.weather-24h-item {
+  min-width: 66px;
+  padding: 9px 6px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-24h-rain {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #64d2ff;
+  min-height: 1em;
+}
+
+/* Previsão 7 Dias estilo Apple Weather */
+.weather-7d-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.weather-7d-row {
+  display: grid;
+  grid-template-columns: 92px 34px 44px 36px 1fr 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.032);
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-7d-day {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.weather-7d-rain {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #64d2ff;
+  text-align: center;
+}
+
+.weather-7d-min {
+  font-size: 0.82rem;
+  color: var(--label-tertiary);
+  text-align: right;
+}
+
+.weather-7d-max {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--label-primary);
+  text-align: left;
+}
+
+.weather-7d-bar-track {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.weather-7d-bar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #64d2ff 0%, #ffd60a 65%, #ff9f0a 100%);
+}
+
+/* Evita que o response-card esprema o microfone em telas curtas/horizontais */
+@media (max-height: 700px) {
+  body.has-response .quick-prompts {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .weather-charts-grid,
+  .new-event-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .weather-7d-row {
+    grid-template-columns: 74px 28px 36px 32px 1fr 32px;
+    gap: 6px;
+    padding: 7px 8px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 540px) {
+  .fluid-mode-pill {
+    padding: 2px 8px;
+    font-size: 0.64rem;
+  }
+
+  .seg-btn {
+    padding: 2px 7px;
+    font-size: 0.62rem;
+  }
+}

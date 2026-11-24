@@ -1,8 +1,9 @@
-const CACHE_NAME = 'smart-dock-v10';
+const CACHE_NAME = 'smart-dock-v11';
 const APP_SHELL = [
   './',
   './index.html',
   './styles.css',
+  './expanded-ui.css',
   './app.js',
   './manifest.json',
   './icons/icon.svg',
