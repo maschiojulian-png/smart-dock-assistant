@@ -1,6 +1,6 @@
 /* ==========================================================================
    Smart Dock & Assistente Pessoal por Voz (PWA — Apple iOS Dark Style)
-   Relógio + Clima (Open-Meteo) + Wake Lock + Google Agenda + Gemini API
+   Relógio + Clima (Open-Meteo) + Wake Lock + Google Agenda + Gemini 2.5 Flash
    ========================================================================== */
 
 (() => {
@@ -28,11 +28,11 @@
     'gemini-3.8-flash',
     'gemini-flash-latest',
   ];
-  const GEMINI_TTS_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+  const GEMINI_TTS_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-2.5-pro-preview-tts'];
   const GEMINI_REQUEST_TIMEOUT_MS = 12000;
-  const GEMINI_TTS_TIMEOUT_MS = 7000;
+  const GEMINI_TTS_TIMEOUT_MS = 11000;
   const MODEL_COOLDOWN_MS = 60 * 1000; // 60s de pausa para modelo com 503/429
-  const TTS_COOLDOWN_MS = 120 * 1000;  // 2min de pausa para TTS com 503/429
+  const TTS_COOLDOWN_MS = 30 * 1000;   // 30s de pausa para TTS com erro temporário (60s em 429)
   const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
   const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
   const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
@@ -65,8 +65,12 @@
   const state = {
     assistantState: 'idle', // 'idle' | 'listening' | 'thinking' | 'speaking'
     audioUnlocked: false,
+    htmlAudioUnlocked: false,
     speechPrimed: false,
     audioCtx: null,
+    persistentAudio: null,
+    silentWavUrl: null,
+    lastMicStoppedAt: 0,
     wakeLockSentinel: null,
     wakeLockDesired: false,
 
@@ -348,7 +352,7 @@
 
     setTimeout(() => {
       toast.style.opacity = '0';
-      toast.style.transform = 'translateY(-8px)';
+      toast.style.transform = 'translateY(8px)';
       toast.style.transition = 'opacity 220ms ease, transform 220ms ease';
       setTimeout(() => toast.remove(), 240);
     }, duration);
@@ -504,6 +508,20 @@
   // --------------------------------------------------------------------------
   // Compatibilidade iOS: Desbloqueio de Áudio e TTS no Primeiro Toque
   // --------------------------------------------------------------------------
+  function ensurePersistentAudio() {
+    if (!state.persistentAudio) {
+      const audio = new Audio();
+      audio.preload = 'auto';
+      audio.playsInline = true;
+      audio.setAttribute('playsinline', '');
+      audio.setAttribute('webkit-playsinline', '');
+      if ('preservesPitch' in audio) audio.preservesPitch = true;
+      if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+      state.persistentAudio = audio;
+    }
+    return state.persistentAudio;
+  }
+
   function unlockAudioOnFirstGesture(options = {}) {
     const primeSpeech = options.primeSpeech !== false;
 
@@ -513,7 +531,7 @@
         if (!state.audioCtx) {
           state.audioCtx = new AudioCtx();
         }
-        if (state.audioCtx.state === 'suspended') {
+        if (state.audioCtx.state !== 'running') {
           state.audioCtx.resume().catch(() => {});
         }
         if (!state.audioUnlocked) {
@@ -522,6 +540,36 @@
           source.buffer = buffer;
           source.connect(state.audioCtx.destination);
           source.start(0);
+        }
+      }
+
+      // Desbloqueia um único HTMLAudioElement persistente com um WAV silencioso
+      // (essencial no iOS/macOS Safari para reproduzir voz natural após o microfone fechar)
+      const persistent = ensurePersistentAudio();
+      if (!state.htmlAudioUnlocked && state.assistantState !== 'speaking') {
+        if (!state.silentWavUrl) {
+          state.silentWavUrl = URL.createObjectURL(buildWavBlobFromPcm16(new Uint8Array(400), 8000, 1));
+        }
+        const silentUrl = state.silentWavUrl;
+        persistent.muted = true;
+        persistent.src = silentUrl;
+        const playPromise = persistent.play();
+        if (playPromise && typeof playPromise.then === 'function') {
+          playPromise
+            .then(() => {
+              if (persistent.src === silentUrl && state.assistantState !== 'speaking') {
+                persistent.pause();
+                persistent.currentTime = 0;
+              }
+              persistent.muted = false;
+              state.htmlAudioUnlocked = true;
+            })
+            .catch(() => {
+              persistent.muted = false;
+            });
+        } else {
+          persistent.muted = false;
+          state.htmlAudioUnlocked = true;
         }
       }
 
@@ -545,9 +593,11 @@
   function setupAudioUnlockListeners() {
     const events = ['touchstart', 'pointerdown', 'click', 'keydown'];
     const handler = (evt) => {
-      const isMicTap = Boolean(evt?.target?.closest && evt.target.closest('#micBtn'));
-      unlockAudioOnFirstGesture({ primeSpeech: !isMicTap });
-      if (state.audioUnlocked && state.speechPrimed) {
+      const isMicClick = evt?.type === 'click' && Boolean(evt?.target?.closest && evt.target.closest('#micBtn'));
+      // Em touchstart/pointerdown (inclusive no botão do microfone), já prepara AudioContext,
+      // HTMLAudioElement persistente e speechSynthesis ANTES do click abrir o microfone
+      unlockAudioOnFirstGesture({ primeSpeech: !isMicClick });
+      if (state.audioUnlocked && state.htmlAudioUnlocked && state.speechPrimed) {
         events.forEach((e) => window.removeEventListener(e, handler, true));
       }
     };
@@ -566,7 +616,7 @@
     if (!state.audioCtx) {
       state.audioCtx = new AudioCtx();
     }
-    if (state.audioCtx.state === 'suspended') {
+    if (state.audioCtx.state !== 'running') {
       state.audioCtx.resume().catch(() => {});
     }
     return state.audioCtx;
@@ -583,6 +633,7 @@
       osc.type = 'sine';
 
       if (kind === 'turn') {
+        // Toquezinho bem suave e agradável indicando que é a vez do usuário falar
         osc.frequency.setValueAtTime(620, now);
         osc.frequency.exponentialRampToValueAtTime(840, now + 0.085);
         gain.gain.setValueAtTime(0.0008, now);
@@ -1501,6 +1552,7 @@
       window.matchMedia('(display-mode: standalone)').matches ||
       window.navigator.standalone === true;
 
+    // Se já estiver aberto como App na Tela de Início (tela cheia real no iOS), oculta o botão
     if (isStandalone) {
       el.fullscreenBtn.classList.add('hidden');
       return;
@@ -1518,6 +1570,7 @@
 
     el.fullscreenBtn.addEventListener('click', async () => {
       if (!isFsSupported) {
+        // iPhone Safari não implementa Fullscreen API em abas comuns -> mostra guia de Tela de Início
         openIosFullscreenGuide();
         return;
       }
@@ -1812,6 +1865,7 @@
     if (!val) return null;
     if (val instanceof Date) return Number.isNaN(val.getTime()) ? null : val;
     const str = String(val).trim();
+    // Se vier no formato YYYY-MM-DD (dia todo)
     if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
       return parseLocalAllDayDate(str);
     }
@@ -1987,7 +2041,7 @@
     }
     if (el.agendaHeaderSub) {
       el.agendaHeaderSub.textContent =
-        state.agendaRange === 'week' ? 'Hoje e próximos 7 dias · toque para expandir' : 'Hoje · toque para expandir';
+        state.agendaRange === 'week' ? 'Próximos 7 dias · toque para expandir' : 'Hoje · toque para expandir';
     }
     if (state.calendarMode !== 'disconnected') {
       renderEventsList();
@@ -2000,6 +2054,7 @@
     const events = isWeek ? state.weekEvents : state.todayEvents;
     el.eventCountBadge.textContent = String(events.length);
 
+    // Chip de próximo evento no relógio sempre usa o próximo compromisso mais próximo
     const nextEvt = state.todayEvents[0] || state.weekEvents[0];
     if (nextEvt) {
       const isNextToday = getLocalDateKey(nextEvt.startDate) === getLocalDateKey(now);
@@ -2023,6 +2078,7 @@
 
     setAgendaView('list');
 
+    // Lista estruturada estilo calendário (mostrando dia da semana, data, horários e título)
     const todayKey = getLocalDateKey(now);
     const grouped = new Map();
     for (const evt of events) {
@@ -2088,6 +2144,7 @@
       return;
     }
 
+    // Visualização completa dos próximos 7 dias em cards
     const daysHtml = [];
     for (let offset = 0; offset < 7; offset++) {
       const dayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
@@ -2116,6 +2173,7 @@
   function openAgendaExpandedModal(initialRange = 'week') {
     state.modalAgendaRange = initialRange;
     el.newEventForm.classList.add('hidden');
+    // Pré-preenche data de hoje no formulário rápido
     const now = new Date();
     el.newEventDate.value = getLocalDateKey(now);
     const nextHour = (now.getHours() + 1) % 24;
@@ -2252,16 +2310,43 @@
   }
 
   // --------------------------------------------------------------------------
-  // 3. Assistente de Voz: SpeechRecognition + Gemini + SpeechSynthesis
+  // 3. Assistente de Voz: SpeechRecognition + Gemini 2.5 Flash + SpeechSynthesis
   // --------------------------------------------------------------------------
+  function scorePortugueseVoice(voice) {
+    const lang = String(voice?.lang || '').replace('_', '-').toLowerCase();
+    const name = String(voice?.name || '');
+    const uri = String(voice?.voiceURI || '');
+    const combined = `${name} ${uri}`;
+    if (!lang.startsWith('pt')) return -1000;
+
+    let score = lang === 'pt-br' ? 120 : 30;
+    // Prioriza vozes neurais / naturais / nuvem / premium / aprimoradas
+    if (/neural|natural|online|wavenet|chirp/i.test(combined)) score += 95;
+    if (/google\s+portugu[eê]s/i.test(combined)) score += 90;
+    if (/premium|siri/i.test(combined)) score += 85;
+    if (/enhanced|aprimorad|melhorad|hq/i.test(combined)) score += 70;
+    if (/francisca|thalita|fernanda|raquel|vit[oó]ria|camila|ricardo|felipe|ant[oô]nio|luciana/i.test(name)) {
+      score += 22;
+    }
+    if (voice && voice.localService === false) score += 15;
+
+    // Penaliza fortemente vozes robóticas / compactas / caricatas
+    if (/eddy|flo|grandma|grandpa|reed|rocko|sandy|shelley|eloquence|compact|espeak|festival|mbrola|super-compact/i.test(combined)) {
+      score -= 140;
+    }
+    return score;
+  }
+
   function loadVoices() {
     if (!('speechSynthesis' in window)) return;
     const allVoices = window.speechSynthesis.getVoices() || [];
-    const ptVoices = allVoices.filter((v) => v.lang && v.lang.toLowerCase().startsWith('pt'));
+    const ptVoices = allVoices
+      .filter((v) => v.lang && v.lang.replace('_', '-').toLowerCase().startsWith('pt'))
+      .sort((a, b) => scorePortugueseVoice(b) - scorePortugueseVoice(a));
     state.availableVoices = ptVoices.length ? ptVoices : allVoices;
 
     const currentSelected = state.prefs.voiceURI;
-    el.voiceSelect.innerHTML = '<option value="">Automática (melhor voz pt-BR)</option>';
+    el.voiceSelect.innerHTML = '<option value="">Automática (melhor voz natural pt-BR)</option>';
     state.availableVoices.forEach((voice) => {
       const opt = document.createElement('option');
       opt.value = voice.voiceURI;
@@ -2281,20 +2366,11 @@
       if (saved) return saved;
     }
 
-    const ptBr = voices.filter((v) => v.lang && v.lang.toLowerCase() === 'pt-br');
-    const preferredPatterns = [
-      /luciana/i,
-      /google português/i,
-      /francisca/i,
-      /antonio/i,
-      /enhanced|premium|natural/i,
-    ];
-    for (const pattern of preferredPatterns) {
-      const match = ptBr.find((v) => pattern.test(v.name));
-      if (match) return match;
-    }
+    const ptVoices = voices
+      .filter((v) => v.lang && v.lang.replace('_', '-').toLowerCase().startsWith('pt'))
+      .sort((a, b) => scorePortugueseVoice(b) - scorePortugueseVoice(a));
 
-    return ptBr[0] || voices.find((v) => v.lang?.toLowerCase().startsWith('pt')) || null;
+    return ptVoices[0] || null;
   }
 
   function sanitizeTextForSpeech(text) {
@@ -2307,7 +2383,7 @@
       .trim();
   }
 
-  function splitIntoSpeechChunks(text, maxLen = 180) {
+  function splitIntoSpeechChunks(text, maxLen = 190) {
     const clean = sanitizeTextForSpeech(text);
     if (!clean) return [];
     const sentences = clean.match(/[^.!?]+[.!?]*\s*/g) || [clean];
@@ -2363,13 +2439,13 @@
     view.setUint32(4, 36 + pcmBytes.byteLength, true);
     writeStr(8, 'WAVE');
     writeStr(12, 'fmt ');
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
+    view.setUint32(16, 16, true); // PCM chunk size
+    view.setUint16(20, 1, true); // PCM format
     view.setUint16(22, channels, true);
     view.setUint32(24, sampleRate, true);
     view.setUint32(28, byteRate, true);
     view.setUint16(32, blockAlign, true);
-    view.setUint16(34, 16, true);
+    view.setUint16(34, 16, true); // 16-bit
     writeStr(36, 'data');
     view.setUint32(40, pcmBytes.byteLength, true);
     return new Blob([header, pcmBytes], { type: 'audio/wav' });
@@ -2411,7 +2487,7 @@
         state.activeHtmlAudio.onended = null;
         state.activeHtmlAudio.onerror = null;
         state.activeHtmlAudio.pause();
-        state.activeHtmlAudio.src = '';
+        state.activeHtmlAudio.currentTime = 0;
       } catch {
         // Ignora
       }
@@ -2456,6 +2532,7 @@
     state.activeUtterance = null;
     setAssistantState('idle', '');
 
+    // Conversa contínua: SÓ reabre automaticamente se a chave "Conversa Contínua" estiver ATIVADA
     if (state.continuousMode && state.conversationActive && !isAnyModalOpen()) {
       cancelAutoListenTimer();
       state.autoListenTimer = setTimeout(() => {
@@ -2483,6 +2560,7 @@
       }, 320);
     } else {
       state.conversationActive = false;
+      // Quando termina o turno único, mantém o texto breve para leitura e volta ao layout normal
       scheduleAutoResetConversation(6000);
     }
   }
@@ -2524,7 +2602,9 @@
       return audio;
     }
 
-    const callTtsModel = async (model, useLegacyPrebuilt) => {
+    const styledTtsPrompt = `Fale em português do Brasil, de forma natural, calorosa e com ritmo ágil: ${cleanText}`;
+
+    const callTtsModel = async (model, useLegacyPrebuilt, promptText = styledTtsPrompt) => {
       const voiceConfig = useLegacyPrebuilt
         ? { prebuiltVoiceConfig: { voiceName } }
         : { voice: voiceName };
@@ -2532,7 +2612,7 @@
         contents: [
           {
             role: 'user',
-            parts: [{ text: cleanText }],
+            parts: [{ text: promptText }],
           },
         ],
         generationConfig: {
@@ -2567,28 +2647,36 @@
 
     if (!ttsCandidates.length) return null;
 
-    // Tenta no máximo 2 modelos TTS saudáveis e para imediatamente em 429/503 para não consumir cota da IA
-    for (const ttsModel of ttsCandidates.slice(0, 2)) {
+    // Tenta o modelo neural TTS principal sem saturar a cota de RPM
+    for (const ttsModel of ttsCandidates.slice(0, 1)) {
       try {
-        let { response, data } = await callTtsModel(ttsModel, true);
+        let { response, data } = await callTtsModel(ttsModel, true, styledTtsPrompt);
         if (
           !response.ok &&
           response.status === 400 &&
           /prebuiltVoiceConfig|voiceConfig/i.test(data?.error?.message || '')
         ) {
-          ({ response, data } = await callTtsModel(ttsModel, false));
+          ({ response, data } = await callTtsModel(ttsModel, false, styledTtsPrompt));
         }
         if (response.ok) {
-          const audio = extractInlineAudio(data);
+          let audio = extractInlineAudio(data);
+          if (!audio) {
+            // Caso raro sem inlineData com prefixo de estilo: tenta 1 vez com texto puro
+            const retry = await callTtsModel(ttsModel, true, cleanText);
+            if (retry.response.ok) {
+              audio = extractInlineAudio(retry.data);
+            }
+          }
           if (audio) {
             state.lastWorkingTtsModel = ttsModel;
             state.lastTtsCache = { text: cleanText, voiceName, audio };
             return audio;
           }
-        } else if (response.status === 404 || response.status === 403 || response.status === 400) {
+        } else if (response.status === 404 || response.status === 403) {
           state.unavailableTtsModels.add(ttsModel);
         } else if ([429, 500, 502, 503, 504].includes(response.status)) {
-          state.ttsCooldowns.set(ttsModel, Date.now() + TTS_COOLDOWN_MS);
+          const waitMs = response.status === 429 ? 60000 : TTS_COOLDOWN_MS;
+          state.ttsCooldowns.set(ttsModel, Date.now() + waitMs);
           break;
         }
       } catch (err) {
@@ -2606,13 +2694,59 @@
     const rate = Math.min(1.4, Math.max(0.8, Number(state.prefs.speechRate) || 1.0));
     const isRawPcm = /pcm|audio\/l16/i.test(audio.mimeType || '');
 
+    // 1) Reprodução prioritária via HTMLAudioElement persistente pré-desbloqueado:
+    //    - Funciona no iOS/macOS Safari mesmo depois de SpeechRecognition interromper o AudioContext
+    //    - Preserva o timbre natural da voz em qualquer velocidade (preservesPitch = true)
+    try {
+      if (queueId !== state.speechQueueId) return true;
+      const blob = isRawPcm
+        ? buildWavBlobFromPcm16(audio.bytes, audio.sampleRate || 24000, 1)
+        : new Blob([audio.bytes], { type: audio.mimeType || 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const htmlAudio = ensurePersistentAudio();
+      htmlAudio.onended = null;
+      htmlAudio.onerror = null;
+      htmlAudio.muted = false;
+      htmlAudio.volume = 1.0;
+      htmlAudio.src = url;
+      htmlAudio.playbackRate = rate;
+      if ('preservesPitch' in htmlAudio) htmlAudio.preservesPitch = true;
+      if ('webkitPreservesPitch' in htmlAudio) htmlAudio.webkitPreservesPitch = true;
+
+      state.activeAudioUrl = url;
+      state.activeHtmlAudio = htmlAudio;
+
+      htmlAudio.onended = () => {
+        cleanupActiveAudio();
+        handleSpeechFinished(queueId);
+      };
+      htmlAudio.onerror = () => {
+        cleanupActiveAudio();
+        if (queueId === state.speechQueueId) {
+          setAssistantState('idle', '');
+        }
+      };
+
+      await htmlAudio.play();
+      if (queueId !== state.speechQueueId) {
+        cleanupActiveAudio();
+        return true;
+      }
+      setAssistantState('speaking', 'Falando...');
+      return true;
+    } catch (err) {
+      cleanupActiveAudio();
+      console.warn('Falha ao tocar áudio via HTMLAudioElement persistente, tentando AudioContext:', err);
+    }
+
+    // 2) Fallback via Web Audio API (retoma inclusive estado 'interrupted' no iOS)
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) {
         if (!state.audioCtx) {
           state.audioCtx = new AudioCtx();
         }
-        if (state.audioCtx.state === 'suspended') {
+        if (state.audioCtx.state !== 'running') {
           await state.audioCtx.resume();
         }
         if (state.audioCtx.state === 'running' && queueId === state.speechQueueId) {
@@ -2651,39 +2785,10 @@
         }
       }
     } catch (err) {
-      console.warn('Falha ao tocar áudio via AudioContext, tentando HTML Audio:', err);
+      console.warn('Falha ao tocar áudio via AudioContext:', err);
     }
 
-    try {
-      if (queueId !== state.speechQueueId) return true;
-      const blob = isRawPcm
-        ? buildWavBlobFromPcm16(audio.bytes, audio.sampleRate || 24000, 1)
-        : new Blob([audio.bytes], { type: audio.mimeType || 'audio/wav' });
-      const url = URL.createObjectURL(blob);
-      const htmlAudio = new Audio(url);
-      htmlAudio.playbackRate = rate;
-      state.activeAudioUrl = url;
-      state.activeHtmlAudio = htmlAudio;
-      setAssistantState('speaking', 'Falando...');
-
-      htmlAudio.onended = () => {
-        cleanupActiveAudio();
-        handleSpeechFinished(queueId);
-      };
-      htmlAudio.onerror = () => {
-        cleanupActiveAudio();
-        if (queueId === state.speechQueueId) {
-          setAssistantState('idle', '');
-        }
-      };
-
-      await htmlAudio.play();
-      return true;
-    } catch (err) {
-      cleanupActiveAudio();
-      console.warn('Falha ao tocar áudio via HTMLAudioElement:', err);
-      return false;
-    }
+    return false;
   }
 
   function speakWithBrowserSynthesis(cleanText, queueId) {
@@ -2726,6 +2831,7 @@
       utterance.rate = rate;
       utterance.pitch = 1.0;
 
+      // Mantém referência forte para evitar bug de GC no Chrome
       state.activeUtterance = utterance;
 
       utterance.onend = () => {
@@ -2763,14 +2869,18 @@
       }
     };
 
+    // Pequeno atraso após cancel() (e após fechar o microfone no iOS) evita que a fala seja engolida
     if (state.speechStartTimer) {
       clearTimeout(state.speechStartTimer);
       state.speechStartTimer = null;
     }
+    const sinceMicMs = Date.now() - (state.lastMicStoppedAt || 0);
+    const micSettleMs = sinceMicMs >= 0 && sinceMicMs < 240 ? 240 - sinceMicMs : 0;
+    const startDelayMs = Math.max(wasBusy ? 75 : 35, micSettleMs);
     state.speechStartTimer = setTimeout(() => {
       state.speechStartTimer = null;
       speakNext(0);
-    }, wasBusy ? 75 : 35);
+    }, startDelayMs);
   }
 
   async function speakText(text) {
@@ -2829,8 +2939,8 @@
   function startVoiceRecognition(isAutoFollowUp = false, retryCount = 0) {
     const autoFollowUp = isAutoFollowUp === true;
     cancelAutoListenTimer();
-    cancelAutoResetConversation();
 
+    // Se já estiver ouvindo, encerra imediatamente sem travar o estado
     if (state.assistantState === 'listening') {
       if (typeof state.forceStopListening === 'function') {
         state.forceStopListening();
@@ -2846,6 +2956,7 @@
       return;
     }
 
+    // Se estiver consultando o Gemini, cancela a requisição
     if (state.assistantState === 'thinking' && state.currentAbortController) {
       state.conversationActive = false;
       state.currentAbortController._userCancelled = true;
@@ -2853,10 +2964,10 @@
       state.currentAbortController = null;
       setAssistantState('idle', 'Consulta cancelada.');
       showToast('Consulta cancelada.', 'info', 2000);
-      scheduleAutoResetConversation(1500);
       return;
     }
 
+    // Se estiver falando e o usuário tocar no microfone, interrompe a fala e já começa a ouvir
     if (state.assistantState === 'speaking') {
       stopSpeaking(true);
     }
@@ -2877,13 +2988,16 @@
       return;
     }
 
+    // Conversa contínua SÓ fica ativa se a chave estiver ligada
     if (!autoFollowUp) {
       state.conversationActive = Boolean(state.continuousMode);
     }
 
+    // Para síntese ativa e garante AudioContext sem travar SpeechRecognition no iOS
     stopSpeaking(state.conversationActive);
     unlockAudioOnFirstGesture({ primeSpeech: false });
 
+    // Limpa qualquer instância anterior presa
     if (state.recognition) {
       try {
         state.recognition.onstart = null;
@@ -2898,6 +3012,7 @@
       state.recognition = null;
     }
 
+    // Configuração exata por turno para máxima confiabilidade em pt-BR (inclusive frases curtas como "Bom dia")
     const recognition = new SpeechRec();
     recognition.lang = 'pt-BR';
     recognition.interimResults = false;
@@ -2955,6 +3070,7 @@
           idleStatus !== undefined ? idleStatus : '',
           isError
         );
+        // Quando corta o microfone sem fala, limpa os textos e volta ao layout normal
         scheduleAutoResetConversation(isError ? 3500 : 800);
       }
     };
@@ -2979,8 +3095,9 @@
 
     recognition.onstart = () => {
       if (isFinalized) return;
-      setAssistantState('listening', autoFollowUp ? 'Sua vez — pode falar...' : 'Ouvindo...');
+      setAssistantState('listening', autoFollowUp ? 'Sua vez — pode falar...' : 'Ouvindo... fale agora');
 
+      // Se o usuário não falar nada dentro do tempo limite, corta o microfone automaticamente
       noSpeechTimer = setTimeout(() => {
         if (!capturedTranscript.trim() && !isFinalized) {
           if (autoFollowUp) {
@@ -2995,7 +3112,7 @@
             true,
             autoFollowUp
               ? 'Silêncio detectado — microfone desligado.'
-              : 'Nenhuma fala detectada.',
+              : 'Nenhuma fala detectada. Toque no microfone para tentar novamente.',
             false
           );
         }
@@ -3016,6 +3133,8 @@
       state.finalTranscript = transcript;
       clearAllTimers();
 
+      // Envia imediatamente para o Gemini junto com agenda real (hoje/semana) e clima atual
+      state.lastMicStoppedAt = Date.now();
       try {
         recognition.stop();
       } catch {
@@ -3029,7 +3148,7 @@
       state.conversationActive = false;
       finalizeListening(
         true,
-        'Não consegui entender. Toque no microfone para tentar novamente.',
+        'Não consegui entender. Toque no microfone para falar novamente.',
         true
       );
     };
@@ -3044,6 +3163,7 @@
         return;
       }
 
+      // Em modo contínuo, se o navegador abortar logo após o áudio da IA terminar, tenta 1 vez
       if (
         autoFollowUp &&
         state.continuousMode &&
@@ -3071,7 +3191,7 @@
       }
 
       if (manualStop && errCode === 'aborted') {
-        finalizeListening(true, '', false);
+        finalizeListening(true, 'Microfone pausado.', false);
         return;
       }
 
@@ -3126,7 +3246,6 @@
         showToast(failMsg, 'error', 3800);
       }
       setAssistantState('idle', failMsg, !autoFollowUp);
-      scheduleAutoResetConversation(3000);
     }
   }
 
@@ -3205,6 +3324,7 @@
         })
         .map((m) => String(m.name).replace(/^models\//, ''));
 
+      // Prioriza modelos flash-lite e flash (mais rápidos e menos congestionados)
       names.sort((a, b) => {
         const score = (id) => {
           if (/flash-lite/i.test(id) && !/preview|exp/i.test(id)) return 1;
@@ -3297,7 +3417,6 @@
 
   async function triggerMorningBriefing() {
     unlockAudioOnFirstGesture({ primeSpeech: true });
-    cancelAutoResetConversation();
     if (!hasGeminiAccess()) {
       setAssistantState('idle', 'Configure sua GEMINI_API_KEY nos Ajustes.', true);
       showToast('Configure sua GEMINI_API_KEY nos Ajustes para gerar o resumo.', 'error', 4000);
@@ -3329,8 +3448,10 @@
       return;
     }
 
+    // Conversa contínua só permanece ativa se a chave estiver ligada e o turno vier da voz
     state.conversationActive = Boolean(fromVoice && state.continuousMode);
 
+    // Cancela qualquer consulta anterior que ainda esteja em andamento
     if (state.currentAbortController) {
       state.currentAbortController._superseded = true;
       state.currentAbortController.abort();
@@ -3358,7 +3479,7 @@
 
     const systemPrompt = [
       'Você é o Smart Dock, um assistente pessoal inteligente por voz em português do Brasil.',
-      'Suas respostas serão lidas em voz alta por síntese de fala (TTS): escreva de forma natural, clara, amigável e objetiva (1 a 3 frases curtas para perguntas rápidas, ou 4 a 6 frases fluidas quando o usuário pedir o resumo do dia ou a previsão do tempo).',
+      'Suas respostas serão lidas em voz alta: seja ágil, natural, simpático e direto. Para perguntas comuns, responda em 1 a 2 frases curtas (máximo ~35 palavras) para a voz responder rapidamente. Para resumo do dia ou previsão do tempo completa, responda em 3 a 4 frases fluidas e objetivas.',
       'NÃO use formatação markdown como asteriscos, negrito, hashtags, listas com marcadores ou emojis.',
       `Data e hora atuais: ${formattedNow} (ISO local: ${isoNowLocal}).`,
       `Clima e previsão do tempo em tempo real:\n${weatherContext}`,
@@ -3427,6 +3548,7 @@
         modelUsed = data._modelUsed || selectedModel;
         rawReply = extractGeminiReply(data);
       } else {
+        // Prioriza o último modelo que funcionou nesta sessão, depois os saudáveis (sem cooldown)
         const nowTs = Date.now();
         const orderedRaw = [
           ...(state.lastWorkingModel ? [state.lastWorkingModel] : []),
@@ -3518,6 +3640,7 @@
                 continue;
               }
 
+              // Erro não recuperável (ex: API key inválida) -> para imediatamente
               return false;
             } catch (attemptErr) {
               if (controller._userCancelled || controller._superseded) {
@@ -3538,6 +3661,7 @@
         const triedModels = new Set();
         await tryModelList(modelsToTry, triedModels);
 
+        // Se todos os modelos padrão falharam/estão sob alta demanda, descobre modelos ativos da chave
         if (!succeeded && (sawOverload || triedModels.size > 0)) {
           const discovered = await discoverAvailableGeminiModels(apiKey, controller.signal);
           const freshDiscovered = discovered.filter((m) => !triedModels.has(m)).slice(0, 4);
@@ -3546,6 +3670,7 @@
           }
         }
 
+        // Última tentativa com pequeno backoff caso seja pico passageiro de 503 high demand
         if (!succeeded && sawOverload) {
           if (el.assistantStatus) {
             el.assistantStatus.textContent = 'Alta demanda no Gemini, tentando novamente...';
@@ -3621,6 +3746,7 @@
       }
 
       updateUiMessage(pendingMsg, cleanReply, false);
+      // Lê TODA resposta em voz alta automaticamente (voz, texto ou botão Resumo)
       speakText(cleanReply);
     } catch (err) {
       if (controller._superseded) return;
@@ -3629,7 +3755,6 @@
         if (state.assistantState === 'thinking') {
           setAssistantState('idle', '');
         }
-        scheduleAutoResetConversation(1500);
         return;
       }
       console.error('Erro Gemini API:', err);
@@ -3638,7 +3763,6 @@
       updateUiMessage(pendingMsg, friendlyErr, true);
       showToast(friendlyErr, 'error', 5500);
       setAssistantState('idle', 'Erro ao consultar o Gemini.', true);
-      scheduleAutoResetConversation(5500);
     } finally {
       if (state.currentAbortController === controller) {
         state.currentAbortController = null;
@@ -3823,7 +3947,7 @@
       }
     });
 
-    // Clima
+    // Clima (widget clicável para abrir tela grande com gráficos)
     el.weatherCityBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       el.weatherCityForm.classList.toggle('hidden');
@@ -3865,7 +3989,7 @@
       if (e.target === el.weatherExpandedModal) closeWeatherExpandedModal();
     });
 
-    // Agenda
+    // Agenda (alternador Dia/Semana + widget clicável para abrir semana em tela grande)
     el.connectCalendarBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       connectGoogleCalendar(false);
@@ -4017,6 +4141,7 @@
     setupFullscreenButton();
     bindEvents();
     startClock();
+    // Conversa contínua começa SEMPRE desativada por padrão
     state.continuousMode = false;
     updateContinuousModeUI();
     setWidgetAgendaRange('week');
@@ -4027,9 +4152,11 @@
     registerServiceWorker();
     checkServerConfig();
 
+    // Carrega clima imediatamente e atualiza a cada 15 minutos
     fetchWeather(true);
     setInterval(() => fetchWeather(true), WEATHER_REFRESH_MS);
 
+    // Restaura sessão válida do Google Calendar
     if (restoreSessionToken()) {
       state.calendarMode = 'google';
       fetchTodayEvents();
