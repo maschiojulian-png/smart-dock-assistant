@@ -1,4 +1,4 @@
-const CACHE_NAME = 'smart-dock-v15';
+const CACHE_NAME = 'smart-dock-v16';
 const APP_SHELL = [
   './',
   './index.html',

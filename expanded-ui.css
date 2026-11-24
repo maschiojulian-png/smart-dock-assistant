@@ -442,6 +442,54 @@ body[data-state="speaking"] .assistant-status-dot {
   flex-direction: column;
 }
 
+/* Cabeçalho da Agenda limpo em 2 linhas quando compacto (sem quebrar o título) */
+.widgets-right-column .agenda-card .card-header {
+  flex-wrap: wrap;
+  row-gap: 8px;
+  align-items: center;
+}
+
+.widgets-right-column .agenda-card .card-title-group {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.widgets-right-column .agenda-card .card-title-group > div {
+  min-width: 0;
+}
+
+.widgets-right-column .agenda-card .card-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.widgets-right-column .agenda-card .card-subtitle-small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.widgets-right-column .agenda-card .event-count-badge {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.widgets-right-column .agenda-card .card-actions {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.widgets-right-column .agenda-card .card-actions .segmented-control {
+  margin-right: auto;
+}
+
+/* Toast no topo para nunca sobrepor o campo de texto inferior */
+.toast-container {
+  top: calc(14px + var(--safe-top));
+  bottom: auto;
+}
+
 /* ---- Agenda Estilo Calendário Estruturado ---- */
 .calendar-day-header {
   display: flex;
