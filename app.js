@@ -330,6 +330,13 @@
   function setResponseCardVisible(visible) {
     el.responseCard.classList.toggle('hidden', !visible);
     el.body.classList.toggle('has-response', Boolean(visible));
+    syncVoiceActiveClass();
+  }
+
+  function syncVoiceActiveClass() {
+    const active =
+      state.assistantState !== 'idle' || !el.responseCard.classList.contains('hidden');
+    el.body.classList.toggle('voice-active', active);
   }
 
   function isAnyModalOpen() {
@@ -356,14 +363,16 @@
   function setAssistantState(newState, statusMessage) {
     state.assistantState = newState;
     el.body.dataset.state = newState;
+    syncVoiceActiveClass();
+    if (!el.assistantStatus) return;
     if (statusMessage !== undefined) {
       el.assistantStatus.textContent = statusMessage;
     } else {
       const defaultLabels = {
-        idle: 'Toque no microfone para falar com o Gemini',
-        listening: 'Ouvindo... pare de falar para enviar automaticamente',
-        thinking: 'Consultando Gemini...',
-        speaking: 'Falando — toque no microfone para interromper e falar',
+        idle: '',
+        listening: '',
+        thinking: '',
+        speaking: '',
       };
       el.assistantStatus.textContent = defaultLabels[newState] || '';
     }
@@ -435,16 +444,41 @@
     });
   }
 
+  function ensureAudioContext() {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!state.audioCtx) {
+      state.audioCtx = new AudioCtx();
+    }
+    if (state.audioCtx.state === 'suspended') {
+      state.audioCtx.resume().catch(() => {});
+    }
+    return state.audioCtx;
+  }
+
   function playChime(kind = 'start') {
-    if (!state.prefs.soundChimes || !state.audioCtx) return;
+    if (!state.prefs.soundChimes) return;
+    const ctx = ensureAudioContext();
+    if (!ctx) return;
     try {
-      if (state.audioCtx.state === 'suspended') {
-        state.audioCtx.resume().catch(() => {});
-      }
-      const now = state.audioCtx.currentTime;
-      const osc = state.audioCtx.createOscillator();
-      const gain = state.audioCtx.createGain();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
       osc.type = 'sine';
+
+      if (kind === 'turn') {
+        // Toquezinho bem suave e agradável indicando que é a vez do usuário falar
+        osc.frequency.setValueAtTime(620, now);
+        osc.frequency.exponentialRampToValueAtTime(840, now + 0.085);
+        gain.gain.setValueAtTime(0.0008, now);
+        gain.gain.exponentialRampToValueAtTime(0.032, now + 0.018);
+        gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.13);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.14);
+        return;
+      }
 
       if (kind === 'start') {
         osc.frequency.setValueAtTime(520, now);
@@ -462,7 +496,7 @@
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
 
       osc.connect(gain);
-      gain.connect(state.audioCtx.destination);
+      gain.connect(ctx.destination);
       osc.start(now);
       osc.stop(now + 0.18);
     } catch {
@@ -2294,22 +2328,23 @@
     if (queueId !== state.speechQueueId) return;
     setAssistantState('idle');
 
-    // Conversa fluida: se o usuário falou por voz e o modo contínuo está ativo,
-    // reabre o microfone automaticamente sem precisar tocar ou fechar a mensagem anterior!
-    if (state.conversationActive && state.prefs.continuousVoice && !isAnyModalOpen()) {
+    // Conversa contínua: dá um toquezinho suave e reabre o microfone automaticamente
+    // após a IA terminar de falar. Se o usuário ficar em silêncio, encerra sozinho.
+    if (state.conversationActive && !isAnyModalOpen()) {
       cancelAutoListenTimer();
-      el.assistantStatus.textContent = 'Pronto para continuar ouvindo...';
       state.autoListenTimer = setTimeout(() => {
-        state.autoListenTimer = null;
-        if (
-          state.assistantState === 'idle' &&
-          state.conversationActive &&
-          state.prefs.continuousVoice &&
-          !isAnyModalOpen()
-        ) {
-          startVoiceRecognition(true);
+        if (state.assistantState !== 'idle' || !state.conversationActive || isAnyModalOpen()) {
+          state.autoListenTimer = null;
+          return;
         }
-      }, 650);
+        playChime('turn');
+        state.autoListenTimer = setTimeout(() => {
+          state.autoListenTimer = null;
+          if (state.assistantState === 'idle' && state.conversationActive && !isAnyModalOpen()) {
+            startVoiceRecognition(true, 0);
+          }
+        }, 230);
+      }, 320);
     }
   }
 
@@ -2585,7 +2620,7 @@
     speakWithBrowserSynthesis(cleanText, queueId);
   }
 
-  function startVoiceRecognition(isAutoFollowUp = false) {
+  function startVoiceRecognition(isAutoFollowUp = false, retryCount = 0) {
     const autoFollowUp = isAutoFollowUp === true;
     cancelAutoListenTimer();
 
@@ -2634,13 +2669,12 @@
       return;
     }
 
-    // Ativa conversa fluida quando iniciada por voz (se preferência estiver ligada)
+    // Sempre ativa conversa contínua quando iniciada pelo microfone
     if (!autoFollowUp) {
-      state.conversationActive = Boolean(state.prefs.continuousVoice);
+      state.conversationActive = true;
     }
 
     // Para qualquer síntese de fala ativa sem tocar chime/AudioContext durante a abertura do microfone
-    // (evita conflito de sessão de áudio no iOS Safari, Bluetooth e Windows)
     stopSpeaking(true);
     if (!state.audioUnlocked) {
       state.audioUnlocked = true;
@@ -2662,13 +2696,13 @@
 
     const SILENCE_AUTO_STOP_MS = 1600; // Para automaticamente 1,6s após você terminar de falar
     const SPEECH_END_GRACE_MS = 450;   // Encerra rápido quando o navegador detecta fim de fala
-    const INITIAL_NO_SPEECH_MS = autoFollowUp ? 6500 : 8500;
+    const INITIAL_NO_SPEECH_MS = autoFollowUp ? 5500 : 8000;
     const STOP_FALLBACK_MS = 750;      // Fallback caso o Safari não dispare onend após stop()
 
     const recognition = new SpeechRec();
     recognition.lang = 'pt-BR';
     recognition.interimResults = true;
-    recognition.continuous = true; // Controlamos o auto-stop por silêncio para funcionar igual no iOS e Desktop
+    recognition.continuous = true;
     recognition.maxAlternatives = 1;
 
     state.recognition = recognition;
@@ -2679,6 +2713,7 @@
     let stopFallbackTimer = null;
     let hasStopped = false;
     let isFinalized = false;
+    const startedAt = Date.now();
 
     const clearAllTimers = () => {
       if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
@@ -2700,7 +2735,6 @@
       if (!skipGemini && question) {
         askGemini(question, { fromVoice: true });
       } else {
-        // Se ficou em silêncio no modo contínuo, apenas encerra a conversa suavemente
         if (autoFollowUp) {
           state.conversationActive = false;
         }
@@ -2723,7 +2757,6 @@
         finalizeListening(false);
         return;
       }
-      // Garante encerramento mesmo se o navegador não disparar onend após stop()
       stopFallbackTimer = setTimeout(() => {
         try { recognition.abort(); } catch { /* ignora */ }
         finalizeListening(false);
@@ -2733,27 +2766,20 @@
     state.forceStopListening = triggerAutoStop;
 
     recognition.onstart = () => {
-      setAssistantState(
-        'listening',
-        autoFollowUp
-          ? 'Pode continuar falando... (silêncio para encerrar)'
-          : 'Ouvindo... pare de falar para enviar automaticamente'
-      );
+      setAssistantState('listening');
       setResponseCardVisible(true);
       el.userTranscript.classList.remove('hidden');
       if (!autoFollowUp) {
-        el.userTranscript.textContent = 'Ouvindo... pode falar';
+        el.userTranscript.textContent = 'Ouvindo...';
         el.assistantReply.textContent = '';
       } else {
-        el.userTranscript.textContent = 'Ouvindo sua próxima fala...';
+        el.userTranscript.textContent = 'Ouvindo...';
       }
 
-      // Se nada for falado no tempo limite, encerra sozinho sem travar
+      // Se nada for falado no tempo limite, corta o microfone automaticamente
       initialTimer = setTimeout(() => {
         if (!latestTranscript.trim()) {
-          if (!autoFollowUp) {
-            showToast('Não ouvi nenhuma fala. Tente novamente.', 'info', 3000);
-          } else {
+          if (autoFollowUp) {
             state.conversationActive = false;
           }
           triggerAutoStop();
@@ -2762,7 +2788,6 @@
     };
 
     recognition.onresult = (event) => {
-      // Reconstrói sempre do índice 0 para evitar perda/duplicação de palavras no Safari iOS e Chrome
       let fullText = '';
       let finalOnly = '';
       for (let i = 0; i < event.results.length; i++) {
@@ -2784,7 +2809,6 @@
         }
         el.userTranscript.textContent = `“${latestTranscript}”`;
 
-        // Reinicia o detector de silêncio: parou de falar por 1,6s -> para de escutar sozinho!
         if (silenceTimer) clearTimeout(silenceTimer);
         silenceTimer = setTimeout(() => {
           triggerAutoStop();
@@ -2803,13 +2827,32 @@
 
     recognition.onerror = (event) => {
       console.warn('SpeechRecognition error:', event.error);
-      // Se já captou texto antes de um erro leve (ex: no-speech/aborted após stop), ainda envia!
       if (latestTranscript.trim() && (event.error === 'no-speech' || event.error === 'aborted')) {
         finalizeListening(false);
         return;
       }
 
-      // Em auto-follow-up, no-speech ou not-allowed silencioso encerra o ciclo sem poluir a tela
+      // Se o navegador abortou logo após o áudio da IA terminar, tenta reabrir 1 vez automaticamente
+      if (
+        autoFollowUp &&
+        retryCount < 1 &&
+        Date.now() - startedAt < 900 &&
+        (event.error === 'aborted' || event.error === 'audio-capture')
+      ) {
+        isFinalized = true;
+        clearAllTimers();
+        state.forceStopListening = null;
+        if (state.recognition === recognition) state.recognition = null;
+        setAssistantState('idle');
+        state.autoListenTimer = setTimeout(() => {
+          state.autoListenTimer = null;
+          if (state.conversationActive && !isAnyModalOpen()) {
+            startVoiceRecognition(true, retryCount + 1);
+          }
+        }, 380);
+        return;
+      }
+
       if (autoFollowUp && (event.error === 'no-speech' || event.error === 'aborted' || event.error === 'not-allowed')) {
         state.conversationActive = false;
         finalizeListening(true);
@@ -2842,6 +2885,16 @@
       clearAllTimers();
       state.recognition = null;
       state.forceStopListening = null;
+      if (autoFollowUp && retryCount < 1) {
+        setAssistantState('idle');
+        state.autoListenTimer = setTimeout(() => {
+          state.autoListenTimer = null;
+          if (state.conversationActive && !isAnyModalOpen()) {
+            startVoiceRecognition(true, retryCount + 1);
+          }
+        }, 350);
+        return;
+      }
       state.conversationActive = false;
       if (!autoFollowUp) {
         showToast('Não foi possível iniciar o microfone. Recarregue a página e tente novamente.', 'error', 3800);
@@ -3076,7 +3129,7 @@
 
         for (let idx = 0; idx < modelsToTry.length; idx++) {
           const candidateModel = modelsToTry[idx];
-          if (idx > 0) {
+          if (idx > 0 && el.assistantStatus) {
             el.assistantStatus.textContent = `Tentando modelo alternativo (${candidateModel})...`;
           }
 
@@ -3511,7 +3564,7 @@
       );
     });
 
-    el.quickPrompts.addEventListener('click', (e) => {
+    el.quickPrompts?.addEventListener('click', (e) => {
       const btn = e.target.closest('.quick-chip');
       if (!btn) return;
       unlockAudioOnFirstGesture();
