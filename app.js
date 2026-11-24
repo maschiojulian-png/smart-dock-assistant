@@ -17,8 +17,9 @@
     SESSION_TOKEN: 'smartdock_gcal_token_session',
   };
 
-  const GEMINI_MODEL = 'gemini-2.5-flash';
-  const GEMINI_ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+  const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
+  const GEMINI_FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
+  const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
   const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
   const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
   const CALENDAR_REFRESH_MS = 5 * 60 * 1000; // 5 minutos
@@ -36,6 +37,7 @@
     voiceURI: '',
     speechRate: 1.05,
     soundChimes: true,
+    geminiModel: DEFAULT_GEMINI_MODEL,
   };
 
   // --------------------------------------------------------------------------
@@ -104,6 +106,7 @@
     assistantStatus: document.getElementById('assistantStatus'),
     quickPrompts: document.getElementById('quickPrompts'),
     responseCard: document.getElementById('responseCard'),
+    responseModelLabel: document.getElementById('responseModelLabel'),
     userTranscript: document.getElementById('userTranscript'),
     assistantReply: document.getElementById('assistantReply'),
     replayVoiceBtn: document.getElementById('replayVoiceBtn'),
@@ -149,6 +152,7 @@
     cancelSettingsBtn: document.getElementById('cancelSettingsBtn'),
     settingsForm: document.getElementById('settingsForm'),
     geminiKeyInput: document.getElementById('geminiKeyInput'),
+    geminiModelSelect: document.getElementById('geminiModelSelect'),
     toggleGeminiKeyBtn: document.getElementById('toggleGeminiKeyBtn'),
     googleClientIdInput: document.getElementById('googleClientIdInput'),
     settingsCityInput: document.getElementById('settingsCityInput'),
@@ -276,7 +280,7 @@
       const defaultLabels = {
         idle: 'Toque no microfone para falar com o Gemini',
         listening: 'Ouvindo você em português... toque para encerrar',
-        thinking: 'Consultando Gemini 2.5 Flash...',
+        thinking: 'Consultando Gemini...',
         speaking: 'Falando — toque no botão para parar',
       };
       el.assistantStatus.textContent = defaultLabels[newState] || '';
@@ -1560,33 +1564,76 @@
     state.currentAbortController = controller;
 
     try {
-      const targetUrl = useServerProxy
-        ? './api/gemini'
-        : `${GEMINI_ENDPOINT}?key=${encodeURIComponent(apiKey)}`;
-
-      const response = await fetch(targetUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const selectedModel = state.prefs.geminiModel || DEFAULT_GEMINI_MODEL;
+      const requestPayload = {
+        systemInstruction: {
+          parts: [{ text: systemPrompt }],
         },
-        signal: controller.signal,
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: systemPrompt }],
-          },
-          contents,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: 512,
-          },
-        }),
-      });
+        contents,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 512,
+        },
+      };
 
-      const data = await response.json().catch(() => ({}));
+      let data = {};
+      let modelUsed = selectedModel;
 
-      if (!response.ok) {
-        const apiMsg = data?.error?.message || `Erro HTTP ${response.status}`;
-        throw new Error(apiMsg);
+      if (useServerProxy) {
+        const response = await fetch('./api/gemini', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({ ...requestPayload, model: selectedModel }),
+        });
+        data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data?.error?.message || `Erro HTTP ${response.status}`);
+        }
+        modelUsed = data._modelUsed || selectedModel;
+      } else {
+        // Chamada direta com fallback automático caso um modelo seja descontinuado
+        const modelsToTry = [
+          selectedModel,
+          ...GEMINI_FALLBACK_MODELS.filter((m) => m !== selectedModel),
+        ];
+        let succeeded = false;
+        let lastError = 'Erro ao consultar o Gemini.';
+
+        for (const candidateModel of modelsToTry) {
+          const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(candidateModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify(requestPayload),
+          });
+          data = await response.json().catch(() => ({}));
+          if (response.ok) {
+            modelUsed = candidateModel;
+            succeeded = true;
+            break;
+          }
+          const apiMsg = data?.error?.message || `Erro HTTP ${response.status}`;
+          lastError = apiMsg;
+          const lower = apiMsg.toLowerCase();
+          const isModelIssue =
+            response.status === 404 ||
+            lower.includes('no longer available') ||
+            lower.includes('not found') ||
+            lower.includes('deprecated');
+          if (!isModelIssue) {
+            break;
+          }
+        }
+
+        if (!succeeded) {
+          throw new Error(lastError);
+        }
+      }
+
+      if (el.responseModelLabel) {
+        el.responseModelLabel.textContent = modelUsed.replace(/-/g, ' ');
       }
 
       const rawReply =
@@ -1637,6 +1684,9 @@
     el.googleClientIdInput.placeholder = state.serverGoogleClientId
       ? 'Conectado automaticamente via Vercel (opcional sobrescrever)'
       : '1234567890-abcdefg.apps.googleusercontent.com';
+    if (el.geminiModelSelect) {
+      el.geminiModelSelect.value = state.prefs.geminiModel || DEFAULT_GEMINI_MODEL;
+    }
     el.settingsCityInput.value = '';
     el.settingsCityInput.placeholder = `Atual: ${state.weatherLocation.name}`;
     el.speechRateInput.value = String(state.prefs.speechRate);
@@ -1685,6 +1735,7 @@
       format24h: el.format24hToggle.checked,
       showSeconds: el.showSecondsToggle.checked,
       soundChimes: el.soundChimesToggle.checked,
+      geminiModel: el.geminiModelSelect?.value || DEFAULT_GEMINI_MODEL,
     });
 
     updateConfigBadge();
