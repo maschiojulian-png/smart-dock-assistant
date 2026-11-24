@@ -449,15 +449,39 @@
 
         <div class="prefs-grid">
           <div class="field-group">
-            <label for="voiceSelect">Voz do Assistente (pt-BR)</label>
+            <label for="voiceEngineSelect">Tipo de Voz</label>
+            <select id="voiceEngineSelect">
+              <option value="gemini">Gemini Neural (Natural — Recomendado)</option>
+              <option value="browser">Voz do Navegador (Local / Offline)</option>
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label for="geminiVoiceSelect">Voz Neural Gemini</label>
+            <select id="geminiVoiceSelect">
+              <option value="Aoede">Aoede (Feminina · suave e natural)</option>
+              <option value="Kore">Kore (Feminina · firme e clara)</option>
+              <option value="Leda">Leda (Feminina · jovem e expressiva)</option>
+              <option value="Zephyr">Zephyr (Simpática e leve)</option>
+              <option value="Puck">Puck (Masculina · animada e natural)</option>
+              <option value="Charon">Charon (Masculina · calma e clara)</option>
+              <option value="Fenrir">Fenrir (Masculina · grave e envolvente)</option>
+              <option value="Orus">Orus (Masculina · equilibrada)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="prefs-grid">
+          <div class="field-group">
+            <label for="voiceSelect">Voz Local (Fallback / Offline)</label>
             <select id="voiceSelect">
               <option value="">Automática (melhor voz pt-BR)</option>
             </select>
           </div>
 
           <div class="field-group">
-            <label for="speechRateInput">Velocidade da Fala: <strong id="speechRateValue">1.05x</strong></label>
-            <input type="range" id="speechRateInput" min="0.8" max="1.4" step="0.05" value="1.05" />
+            <label for="speechRateInput">Velocidade da Fala: <strong id="speechRateValue">1.00x</strong></label>
+            <input type="range" id="speechRateInput" min="0.8" max="1.4" step="0.05" value="1.0" />
           </div>
         </div>
 

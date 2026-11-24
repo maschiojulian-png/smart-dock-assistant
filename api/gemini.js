@@ -7,6 +7,21 @@ const ALLOWED_MODELS = new Set([
   'gemini-2.5-flash',
 ]);
 const FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+const TTS_FALLBACK_MODELS = [
+  'gemini-3.8-flash-lite-tts',
+  'gemini-3.8-flash-tts',
+  'gemini-2.5-flash-preview-tts',
+];
+const ALLOWED_VOICES = new Set([
+  'Aoede',
+  'Kore',
+  'Leda',
+  'Zephyr',
+  'Puck',
+  'Charon',
+  'Fenrir',
+  'Orus',
+]);
 const MODEL_TIMEOUT_MS = 9500;
 
 function getThinkingConfigForModel(model) {
@@ -24,6 +39,11 @@ function hasVisibleReply(data) {
   return parts.some((p) => !p.thought && typeof p.text === 'string' && p.text.trim().length > 0);
 }
 
+function hasAudioReply(data) {
+  const parts = data?.candidates?.[0]?.content?.parts || [];
+  return parts.some((p) => Boolean(p?.inlineData?.data || p?.inline_data?.data));
+}
+
 function isRetryableStatus(status, errMsg) {
   if ([404, 429, 500, 502, 503, 504].includes(status)) return true;
   const lower = String(errMsg || '').toLowerCase();
@@ -34,21 +54,13 @@ function isRetryableStatus(status, errMsg) {
     lower.includes('not supported') ||
     lower.includes('overloaded') ||
     lower.includes('unavailable') ||
+    lower.includes('high demand') ||
     lower.includes('quota') ||
     lower.includes('rate limit')
   );
 }
 
-async function callGeminiModel(model, apiKey, basePayload, includeThinking = true) {
-  const thinkingConfig = includeThinking ? getThinkingConfigForModel(model) : null;
-  const payload = {
-    ...basePayload,
-    generationConfig: {
-      ...basePayload.generationConfig,
-      ...(thinkingConfig ? { thinkingConfig } : {}),
-    },
-  };
-
+async function callGeminiEndpoint(model, apiKey, payload) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
 
@@ -82,6 +94,59 @@ async function callGeminiModel(model, apiKey, basePayload, includeThinking = tru
   }
 }
 
+async function callGeminiModel(model, apiKey, basePayload, includeThinking = true) {
+  const thinkingConfig = includeThinking ? getThinkingConfigForModel(model) : null;
+  const payload = {
+    ...basePayload,
+    generationConfig: {
+      ...basePayload.generationConfig,
+      ...(thinkingConfig ? { thinkingConfig } : {}),
+    },
+  };
+  return callGeminiEndpoint(model, apiKey, payload);
+}
+
+async function handleTtsRequest(body, apiKey, res) {
+  const text = String(body.text || '').trim().slice(0, 1200);
+  if (!text) {
+    return res.status(400).json({ error: { message: 'Texto ausente para síntese de voz.' } });
+  }
+  const voiceName = ALLOWED_VOICES.has(body.voiceName) ? body.voiceName : 'Aoede';
+
+  let lastResult = null;
+  for (const ttsModel of TTS_FALLBACK_MODELS) {
+    const buildPayload = (usePrebuilt) => ({
+      contents: [{ role: 'user', parts: [{ text }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: usePrebuilt
+            ? { prebuiltVoiceConfig: { voiceName } }
+            : { voice: voiceName },
+        },
+      },
+    });
+
+    let result = await callGeminiEndpoint(ttsModel, apiKey, buildPayload(true));
+    if (
+      !result.ok &&
+      result.status === 400 &&
+      /prebuiltVoiceConfig|voiceConfig/i.test(result.data?.error?.message || '')
+    ) {
+      result = await callGeminiEndpoint(ttsModel, apiKey, buildPayload(false));
+    }
+
+    lastResult = result;
+    if (result.ok && hasAudioReply(result.data)) {
+      return res.status(200).json({ ...result.data, _modelUsed: ttsModel });
+    }
+  }
+
+  return res.status(lastResult?.status || 502).json(
+    lastResult?.data || { error: { message: 'Nenhum modelo TTS respondeu com áudio.' } }
+  );
+}
+
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
 
@@ -108,6 +173,11 @@ module.exports = async function handler(req, res) {
 
   try {
     const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body || {};
+
+    if (body.action === 'tts') {
+      return await handleTtsRequest(body, apiKey, res);
+    }
+
     const { systemInstruction, contents, generationConfig, model } = body;
 
     if (!Array.isArray(contents) || contents.length === 0) {
