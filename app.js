@@ -19,7 +19,9 @@
 
   const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
   const GEMINI_FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+  const GEMINI_TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts', 'gemini-2.5-flash-preview-tts'];
   const GEMINI_REQUEST_TIMEOUT_MS = 16000;
+  const GEMINI_TTS_TIMEOUT_MS = 14000;
   const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
   const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
   const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
@@ -35,8 +37,10 @@
   const DEFAULT_PREFS = {
     format24h: true,
     showSeconds: true,
+    voiceEngine: 'gemini', // 'gemini' | 'browser'
+    geminiVoiceName: 'Aoede',
     voiceURI: '',
-    speechRate: 1.05,
+    speechRate: 1.0,
     soundChimes: true,
     geminiModel: DEFAULT_GEMINI_MODEL,
   };
@@ -74,6 +78,11 @@
     chatHistory: [],
     availableVoices: [],
     currentAbortController: null,
+    ttsAbortController: null,
+    activeAudioSource: null,
+    activeHtmlAudio: null,
+    activeAudioUrl: null,
+    lastTtsCache: null,
     speechQueueId: 0,
 
     // Preferências
@@ -158,6 +167,8 @@
     toggleGeminiKeyBtn: document.getElementById('toggleGeminiKeyBtn'),
     googleClientIdInput: document.getElementById('googleClientIdInput'),
     settingsCityInput: document.getElementById('settingsCityInput'),
+    voiceEngineSelect: document.getElementById('voiceEngineSelect'),
+    geminiVoiceSelect: document.getElementById('geminiVoiceSelect'),
     voiceSelect: document.getElementById('voiceSelect'),
     speechRateInput: document.getElementById('speechRateInput'),
     speechRateValue: document.getElementById('speechRateValue'),
@@ -1343,8 +1354,102 @@
     return chunks;
   }
 
+  function base64ToUint8Array(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  function parseSampleRateFromMime(mimeType, fallback = 24000) {
+    const match = String(mimeType || '').match(/rate=(\d+)/i);
+    const parsed = match ? Number(match[1]) : fallback;
+    return Number.isFinite(parsed) && parsed >= 8000 && parsed <= 96000 ? parsed : fallback;
+  }
+
+  function buildWavBlobFromPcm16(pcmBytes, sampleRate = 24000, channels = 1) {
+    const header = new ArrayBuffer(44);
+    const view = new DataView(header);
+    const writeStr = (offset, str) => {
+      for (let i = 0; i < str.length; i++) {
+        view.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+    const byteRate = sampleRate * channels * 2;
+    const blockAlign = channels * 2;
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + pcmBytes.byteLength, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true); // PCM chunk size
+    view.setUint16(20, 1, true); // PCM format
+    view.setUint16(22, channels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true); // 16-bit
+    writeStr(36, 'data');
+    view.setUint32(40, pcmBytes.byteLength, true);
+    return new Blob([header, pcmBytes], { type: 'audio/wav' });
+  }
+
+  function extractInlineAudio(data) {
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+      const inline = part?.inlineData || part?.inline_data;
+      if (inline?.data) {
+        const mimeType = inline.mimeType || inline.mime_type || 'audio/L16;codec=pcm;rate=24000';
+        return {
+          bytes: base64ToUint8Array(inline.data),
+          mimeType,
+          sampleRate: parseSampleRateFromMime(mimeType, 24000),
+        };
+      }
+    }
+    return null;
+  }
+
+  function cleanupActiveAudio() {
+    if (state.ttsAbortController) {
+      state.ttsAbortController.abort();
+      state.ttsAbortController = null;
+    }
+    if (state.activeAudioSource) {
+      try {
+        state.activeAudioSource.onended = null;
+        state.activeAudioSource.stop();
+        state.activeAudioSource.disconnect();
+      } catch {
+        // Ignora
+      }
+      state.activeAudioSource = null;
+    }
+    if (state.activeHtmlAudio) {
+      try {
+        state.activeHtmlAudio.onended = null;
+        state.activeHtmlAudio.onerror = null;
+        state.activeHtmlAudio.pause();
+        state.activeHtmlAudio.src = '';
+      } catch {
+        // Ignora
+      }
+      state.activeHtmlAudio = null;
+    }
+    if (state.activeAudioUrl) {
+      try {
+        URL.revokeObjectURL(state.activeAudioUrl);
+      } catch {
+        // Ignora
+      }
+      state.activeAudioUrl = null;
+    }
+  }
+
   function stopSpeaking() {
     state.speechQueueId += 1;
+    cleanupActiveAudio();
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
@@ -1353,22 +1458,205 @@
     }
   }
 
-  function speakText(text) {
+  async function requestGeminiTtsAudio(cleanText, voiceName, signal) {
+    if (
+      state.lastTtsCache &&
+      state.lastTtsCache.text === cleanText &&
+      state.lastTtsCache.voiceName === voiceName
+    ) {
+      return state.lastTtsCache.audio;
+    }
+
+    const apiKey = getGeminiKey();
+    const useServerProxy = !apiKey && state.serverGeminiConfigured;
+    if (!apiKey && !useServerProxy) return null;
+
+    if (useServerProxy) {
+      const response = await fetchWithTimeout(
+        './api/gemini',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'tts',
+            text: cleanText,
+            voiceName,
+          }),
+        },
+        GEMINI_TTS_TIMEOUT_MS,
+        signal
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) return null;
+      const audio = extractInlineAudio(data);
+      if (audio) {
+        state.lastTtsCache = { text: cleanText, voiceName, audio };
+      }
+      return audio;
+    }
+
+    const callTtsModel = async (model, useLegacyPrebuilt) => {
+      const voiceConfig = useLegacyPrebuilt
+        ? { prebuiltVoiceConfig: { voiceName } }
+        : { voice: voiceName };
+      const payload = {
+        contents: [
+          {
+            role: 'user',
+            parts: [{ text: cleanText }],
+          },
+        ],
+        generationConfig: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig },
+        },
+      };
+      const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        GEMINI_TTS_TIMEOUT_MS,
+        signal
+      );
+      const data = await response.json().catch(() => ({}));
+      return { response, data };
+    };
+
+    for (const ttsModel of GEMINI_TTS_MODELS) {
+      try {
+        let { response, data } = await callTtsModel(ttsModel, true);
+        if (
+          !response.ok &&
+          response.status === 400 &&
+          /prebuiltVoiceConfig|voiceConfig/i.test(data?.error?.message || '')
+        ) {
+          ({ response, data } = await callTtsModel(ttsModel, false));
+        }
+        if (response.ok) {
+          const audio = extractInlineAudio(data);
+          if (audio) {
+            state.lastTtsCache = { text: cleanText, voiceName, audio };
+            return audio;
+          }
+        }
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        console.warn(`Falha TTS no modelo ${ttsModel}:`, err?.message || err);
+      }
+    }
+    return null;
+  }
+
+  async function playGeminiAudioPayload(audio, queueId) {
+    if (queueId !== state.speechQueueId) return true;
+    const rate = Math.min(1.4, Math.max(0.8, Number(state.prefs.speechRate) || 1.0));
+    const isRawPcm = /pcm|audio\/l16/i.test(audio.mimeType || '');
+
+    // Tenta reproduzir via AudioContext (melhor compatibilidade no iOS Safari após unlock)
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        if (!state.audioCtx) {
+          state.audioCtx = new AudioCtx();
+        }
+        if (state.audioCtx.state === 'suspended') {
+          await state.audioCtx.resume();
+        }
+        if (state.audioCtx.state === 'running' && queueId === state.speechQueueId) {
+          let audioBuffer;
+          if (isRawPcm) {
+            const sampleCount = Math.floor(audio.bytes.byteLength / 2);
+            audioBuffer = state.audioCtx.createBuffer(1, sampleCount, audio.sampleRate || 24000);
+            const channel = audioBuffer.getChannelData(0);
+            const view = new DataView(audio.bytes.buffer, audio.bytes.byteOffset, sampleCount * 2);
+            for (let i = 0; i < sampleCount; i++) {
+              channel[i] = view.getInt16(i * 2, true) / 32768;
+            }
+          } else {
+            const copy = audio.bytes.slice().buffer;
+            audioBuffer = await state.audioCtx.decodeAudioData(copy);
+          }
+
+          if (queueId !== state.speechQueueId) return true;
+
+          const source = state.audioCtx.createBufferSource();
+          source.buffer = audioBuffer;
+          source.playbackRate.value = rate;
+          source.connect(state.audioCtx.destination);
+          state.activeAudioSource = source;
+          setAssistantState('speaking');
+
+          source.onended = () => {
+            if (state.activeAudioSource === source) {
+              state.activeAudioSource = null;
+            }
+            if (queueId === state.speechQueueId) {
+              setAssistantState('idle');
+            }
+          };
+
+          source.start(0);
+          return true;
+        }
+      }
+    } catch (err) {
+      console.warn('Falha ao tocar áudio via AudioContext, tentando HTML Audio:', err);
+    }
+
+    // Fallback via HTMLAudioElement + WAV Blob
+    try {
+      if (queueId !== state.speechQueueId) return true;
+      const blob = isRawPcm
+        ? buildWavBlobFromPcm16(audio.bytes, audio.sampleRate || 24000, 1)
+        : new Blob([audio.bytes], { type: audio.mimeType || 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const htmlAudio = new Audio(url);
+      htmlAudio.playbackRate = rate;
+      state.activeAudioUrl = url;
+      state.activeHtmlAudio = htmlAudio;
+      setAssistantState('speaking');
+
+      htmlAudio.onended = () => {
+        cleanupActiveAudio();
+        if (queueId === state.speechQueueId) {
+          setAssistantState('idle');
+        }
+      };
+      htmlAudio.onerror = () => {
+        cleanupActiveAudio();
+        if (queueId === state.speechQueueId) {
+          setAssistantState('idle');
+        }
+      };
+
+      await htmlAudio.play();
+      return true;
+    } catch (err) {
+      cleanupActiveAudio();
+      console.warn('Falha ao tocar áudio via HTMLAudioElement:', err);
+      return false;
+    }
+  }
+
+  function speakWithBrowserSynthesis(cleanText, queueId) {
     if (!('speechSynthesis' in window)) {
-      setAssistantState('idle');
+      if (queueId === state.speechQueueId) setAssistantState('idle');
       return;
     }
 
-    const chunks = splitIntoSpeechChunks(text);
+    const chunks = splitIntoSpeechChunks(cleanText);
     if (!chunks.length) {
-      setAssistantState('idle');
+      if (queueId === state.speechQueueId) setAssistantState('idle');
       return;
     }
 
     window.speechSynthesis.cancel();
-    const queueId = ++state.speechQueueId;
     const voice = pickBestPortugueseVoice();
-    const rate = Number(state.prefs.speechRate) || 1.05;
+    const rate = Number(state.prefs.speechRate) || 1.0;
 
     setAssistantState('speaking');
 
@@ -1399,6 +1687,51 @@
     };
 
     speakNext(0);
+  }
+
+  async function speakText(text) {
+    const cleanText = sanitizeTextForSpeech(text);
+    if (!cleanText) {
+      setAssistantState('idle');
+      return;
+    }
+
+    cleanupActiveAudio();
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    const queueId = ++state.speechQueueId;
+    const wantGeminiVoice = (state.prefs.voiceEngine || 'gemini') === 'gemini' && hasGeminiAccess();
+
+    if (wantGeminiVoice) {
+      const ttsController = new AbortController();
+      state.ttsAbortController = ttsController;
+      setAssistantState('speaking', 'Preparando voz natural...');
+
+      try {
+        const voiceName = state.prefs.geminiVoiceName || 'Aoede';
+        const audio = await requestGeminiTtsAudio(cleanText, voiceName, ttsController.signal);
+        if (state.ttsAbortController === ttsController) {
+          state.ttsAbortController = null;
+        }
+        if (queueId !== state.speechQueueId) return;
+
+        if (audio) {
+          const played = await playGeminiAudioPayload(audio, queueId);
+          if (played) return;
+        }
+      } catch (err) {
+        if (state.ttsAbortController === ttsController) {
+          state.ttsAbortController = null;
+        }
+        if (queueId !== state.speechQueueId) return;
+        console.warn('Gemini TTS indisponível, usando voz local como fallback:', err?.message || err);
+      }
+    }
+
+    if (queueId !== state.speechQueueId) return;
+    speakWithBrowserSynthesis(cleanText, queueId);
   }
 
   function startVoiceRecognition() {
@@ -1937,6 +2270,12 @@
     if (el.geminiModelSelect) {
       el.geminiModelSelect.value = state.prefs.geminiModel || DEFAULT_GEMINI_MODEL;
     }
+    if (el.voiceEngineSelect) {
+      el.voiceEngineSelect.value = state.prefs.voiceEngine || 'gemini';
+    }
+    if (el.geminiVoiceSelect) {
+      el.geminiVoiceSelect.value = state.prefs.geminiVoiceName || 'Aoede';
+    }
     el.settingsCityInput.value = '';
     el.settingsCityInput.placeholder = `Atual: ${state.weatherLocation.name}`;
     el.speechRateInput.value = String(state.prefs.speechRate);
@@ -1980,13 +2319,16 @@
     }
 
     savePrefs({
+      voiceEngine: el.voiceEngineSelect?.value || 'gemini',
+      geminiVoiceName: el.geminiVoiceSelect?.value || 'Aoede',
       voiceURI: el.voiceSelect.value,
-      speechRate: Number(el.speechRateInput.value) || 1.05,
+      speechRate: Number(el.speechRateInput.value) || 1.0,
       format24h: el.format24hToggle.checked,
       showSeconds: el.showSecondsToggle.checked,
       soundChimes: el.soundChimesToggle.checked,
       geminiModel: el.geminiModelSelect?.value || DEFAULT_GEMINI_MODEL,
     });
+    state.lastTtsCache = null;
 
     updateConfigBadge();
     updateClock();
