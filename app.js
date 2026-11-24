@@ -729,6 +729,101 @@
         };
       });
 
+      const todayDateStr = cur.time ? cur.time.slice(0, 10) : getLocalDateKey(new Date());
+      const summarizeDayPeriods = (targetDateStr) => {
+        const periods = [
+          { key: 'morning', label: 'Manhã', startH: 6, endH: 11, temps: [], rains: [], codes: [] },
+          { key: 'afternoon', label: 'Tarde', startH: 12, endH: 17, temps: [], rains: [], codes: [] },
+          { key: 'night', label: 'Noite', startH: 18, endH: 23, temps: [], rains: [], codes: [] },
+        ];
+        let peakRain = { prob: 0, hour: '' };
+        const times = data.hourly?.time || [];
+
+        for (let i = 0; i < times.length; i++) {
+          const t = times[i];
+          if (!t || !t.startsWith(targetDateStr)) continue;
+          const h = Number(t.slice(11, 13));
+          const temp = data.hourly.temperature_2m?.[i];
+          const rain = Math.round(data.hourly.precipitation_probability?.[i] ?? 0);
+          const code = data.hourly.weather_code?.[i] ?? 0;
+
+          if (rain > peakRain.prob) {
+            peakRain = { prob: rain, hour: `${String(h).padStart(2, '0')}h` };
+          }
+
+          for (const p of periods) {
+            if (h >= p.startH && h <= p.endH) {
+              if (typeof temp === 'number') p.temps.push(temp);
+              p.rains.push(rain);
+              p.codes.push(code);
+              break;
+            }
+          }
+        }
+
+        const result = {};
+        for (const p of periods) {
+          if (!p.temps.length) continue;
+          const avgTemp = Math.round(p.temps.reduce((a, b) => a + b, 0) / p.temps.length);
+          const minTemp = Math.round(Math.min(...p.temps));
+          const maxTemp = Math.round(Math.max(...p.temps));
+          const maxRain = Math.max(...p.rains, 0);
+          const midCode = p.codes[Math.floor(p.codes.length / 2)] ?? 0;
+          const isDayPeriod = p.key !== 'night' ? 1 : 0;
+          result[p.key] = {
+            label: p.label,
+            avgTemp,
+            minTemp,
+            maxTemp,
+            rainProb: maxRain,
+            condition: getWeatherVisual(midCode, isDayPeriod).label,
+          };
+        }
+        return { periods: result, peakRain };
+      };
+
+      const todayPeriodSummary = summarizeDayPeriods(todayDateStr);
+      const todayDaily = daily7[0] || null;
+      const tomorrowDaily = daily7[1] || null;
+
+      let tomorrowComparison = null;
+      if (todayDaily && tomorrowDaily) {
+        const todayAvg = Math.round((todayDaily.minTemp + todayDaily.maxTemp) / 2);
+        const tomorrowAvg = Math.round((tomorrowDaily.minTemp + tomorrowDaily.maxTemp) / 2);
+        const diffAvg = tomorrowAvg - todayAvg;
+        const diffRain = tomorrowDaily.rainProb - todayDaily.rainProb;
+
+        const tempTrend =
+          diffAvg >= 2
+            ? `mais quente que hoje (cerca de ${diffAvg}°C a mais na média)`
+            : diffAvg <= -2
+              ? `mais frio que hoje (cerca de ${Math.abs(diffAvg)}°C a menos na média)`
+              : diffAvg === 1
+                ? 'ligeiramente mais quente que hoje (1°C a mais na média)'
+                : diffAvg === -1
+                  ? 'ligeiramente mais frio que hoje (1°C a menos na média)'
+                  : 'com temperatura média parecida com a de hoje';
+
+        const rainTrend =
+          diffRain >= 15
+            ? `mais chance de chuva que hoje (${tomorrowDaily.rainProb}% contra ${todayDaily.rainProb}% hoje)`
+            : diffRain <= -15
+              ? `menos chance de chuva que hoje (${tomorrowDaily.rainProb}% contra ${todayDaily.rainProb}% hoje)`
+              : `chance de chuva parecida com hoje (${tomorrowDaily.rainProb}% contra ${todayDaily.rainProb}% hoje)`;
+
+        tomorrowComparison = {
+          todayAvg,
+          tomorrowAvg,
+          diffAvg,
+          tempTrend,
+          rainTrend,
+          tomorrowCondition: tomorrowDaily.condition,
+          tomorrowMin: tomorrowDaily.minTemp,
+          tomorrowMax: tomorrowDaily.maxTemp,
+          tomorrowRainProb: tomorrowDaily.rainProb,
+        };
+      }
+
       const rainChanceNow =
         data.daily?.precipitation_probability_max?.[0] ??
         hourlySlots[0]?.rainProb ??
@@ -752,6 +847,9 @@
         hourly: hourlySlots,
         hourly24,
         daily7,
+        todayPeriods: todayPeriodSummary.periods,
+        todayPeakRain: todayPeriodSummary.peakRain,
+        tomorrowComparison,
       };
 
       renderWeatherWidget();
@@ -1123,10 +1221,46 @@
   function buildWeatherContextForGemini() {
     const w = state.weatherData;
     if (!w) return 'Dados de clima não disponíveis no momento.';
-    const hourlySummary = w.hourly
-      .map((s) => `${s.label}: ${s.temp}°C (${s.condition})`)
-      .join(', ');
-    return `Clima atual em ${w.city}: ${w.temp}°C (sensação de ${w.feelsLike}°C), ${w.condition}. Máxima de ${w.maxTemp}°C e mínima de ${w.minTemp}°C. Umidade ${w.humidity}%, chance de chuva ${w.rainChance}%, vento ${w.wind} km/h. Próximas horas: ${hourlySummary}.`;
+
+    const lines = [];
+    const todayAvg = Math.round((w.minTemp + w.maxTemp) / 2);
+    lines.push(
+      `Agora em ${w.city}: ${w.temp}°C (sensação de ${w.feelsLike}°C), ${w.condition}. Hoje: mínima ${w.minTemp}°C, máxima ${w.maxTemp}°C, média de ${todayAvg}°C, umidade ${w.humidity}%, chance máxima de chuva ${w.rainChance}%, vento ${w.wind} km/h.`
+    );
+
+    if (w.todayPeriods) {
+      const periodParts = ['morning', 'afternoon', 'night']
+        .map((k) => w.todayPeriods[k])
+        .filter(Boolean)
+        .map(
+          (p) =>
+            `${p.label}: média ${p.avgTemp}°C (${p.minTemp}°C a ${p.maxTemp}°C), ${p.condition}, chance de chuva ${p.rainProb}%`
+        );
+      if (periodParts.length) {
+        lines.push(`Hoje por período: ${periodParts.join(' | ')}.`);
+      }
+    }
+
+    if (w.todayPeakRain && w.todayPeakRain.prob >= 20 && w.todayPeakRain.hour) {
+      lines.push(`Horário com maior chance de chuva hoje: por volta das ${w.todayPeakRain.hour} (${w.todayPeakRain.prob}%).`);
+    }
+
+    if (w.tomorrowComparison) {
+      const t = w.tomorrowComparison;
+      lines.push(
+        `Amanhã (comparado a hoje): ${t.tomorrowCondition}, mínima ${t.tomorrowMin}°C, máxima ${t.tomorrowMax}°C, média de ${t.tomorrowAvg}°C — vai ser ${t.tempTrend}, com ${t.rainTrend}.`
+      );
+    }
+
+    if (w.daily7 && w.daily7.length > 2) {
+      const rest = w.daily7
+        .slice(2, 6)
+        .map((d) => `${d.dayLabel}: ${d.minTemp}°C-${d.maxTemp}°C (${d.condition}, chuva ${d.rainProb}%)`)
+        .join('; ');
+      lines.push(`Próximos dias: ${rest}.`);
+    }
+
+    return lines.join('\n');
   }
 
   // --------------------------------------------------------------------------
@@ -2851,11 +2985,12 @@
 
     const systemPrompt = [
       'Você é o Smart Dock, um assistente pessoal inteligente por voz em português do Brasil.',
-      'Suas respostas serão lidas em voz alta por síntese de fala (TTS): escreva de forma natural, clara, amigável e objetiva (1 a 3 frases curtas, salvo se o usuário pedir mais detalhes).',
+      'Suas respostas serão lidas em voz alta por síntese de fala (TTS): escreva de forma natural, clara, amigável e objetiva (1 a 3 frases curtas para perguntas rápidas, ou 4 a 6 frases fluidas quando o usuário pedir o resumo do dia ou a previsão do tempo).',
       'NÃO use formatação markdown como asteriscos, negrito, hashtags, listas com marcadores ou emojis.',
       `Data e hora atuais: ${formattedNow} (ISO local: ${isoNowLocal}).`,
-      `Clima em tempo real:\n${weatherContext}`,
+      `Clima e previsão do tempo em tempo real:\n${weatherContext}`,
       `Agenda da semana do usuário:\n${calendarContext}`,
+      'PREVISÃO DO TEMPO E RESUMO DO DIA: Quando o usuário perguntar sobre o tempo/clima ou pedir o resumo do dia ("o que tem hoje", "bom dia", "como está o tempo"), fale de forma natural e unificada: informe a temperatura de hoje pela manhã, tarde e noite e a possibilidade de chuva (citando o horário de maior chance se houver), e inclua sempre um resumo de amanhã dizendo se vai ser mais quente ou mais frio, a temperatura média em graus e se vai ter mais ou menos chance de chuva em relação a hoje. Se ele perguntar sobre o dia ou a agenda, inclua também os compromissos de hoje e os destaques dos próximos dias da semana.',
       'CRIAÇÃO DE EVENTOS NA AGENDA: Se o usuário pedir para criar, marcar, agendar ou adicionar um evento, reunião ou compromisso na agenda, confirme de forma natural na sua resposta falada e adicione OBRIGATORIAMENTE no final da resposta (em uma linha separada) o bloco JSON exato: [CREATE_EVENT]{"title":"Título curto","start":"YYYY-MM-DDTHH:MM:SS","end":"YYYY-MM-DDTHH:MM:SS","location":"","description":"","allDay":false}[/CREATE_EVENT]. Se o usuário não informar a duração, use 1 hora após o início. Use exatamente as datas do calendário de referência acima. Nunca mencione a tag CREATE_EVENT no texto falado.',
       'Use os dados reais de agenda e clima sempre que forem relevantes para a pergunta.',
     ].join('\n\n');
