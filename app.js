@@ -1,6 +1,6 @@
 /* ==========================================================================
    Smart Dock & Assistente Pessoal por Voz (PWA — Apple iOS Dark Style)
-   Relógio + Clima (Open-Meteo) + Wake Lock + Google Agenda + Gemini 2.5 Flash
+   Relógio + Clima (Open-Meteo) + Wake Lock + Google Agenda + Gemini API
    ========================================================================== */
 
 (() => {
@@ -18,15 +18,17 @@
   };
 
   const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
-  const GEMINI_FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+  const GEMINI_FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest'];
   const GEMINI_TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts', 'gemini-2.5-flash-preview-tts'];
   const GEMINI_REQUEST_TIMEOUT_MS = 16000;
-  const GEMINI_TTS_TIMEOUT_MS = 14000;
+  const GEMINI_TTS_TIMEOUT_MS = 8000;
   const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
   const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
   const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
   const CALENDAR_REFRESH_MS = 5 * 60 * 1000; // 5 minutos
   const WEATHER_REFRESH_MS = 15 * 60 * 1000; // 15 minutos
+  const BRIEFING_PROMPT =
+    'Bom dia! Faça um resumo objetivo e natural para ser lido em voz alta com: 1) a previsão do tempo atual e de hoje (manhã, tarde, noite e chance de chuva) mais um breve resumo de amanhã; 2) meus compromissos de hoje; 3) os principais eventos dos próximos dias da semana na minha Google Agenda.';
 
   const DEFAULT_WEATHER_LOCATION = {
     name: 'São Paulo, SP',
@@ -42,7 +44,7 @@
     voiceURI: '',
     speechRate: 1.0,
     soundChimes: true,
-    continuousVoice: true,
+    continuousVoice: false,
     geminiModel: DEFAULT_GEMINI_MODEL,
   };
 
@@ -52,6 +54,7 @@
   const state = {
     assistantState: 'idle', // 'idle' | 'listening' | 'thinking' | 'speaking'
     audioUnlocked: false,
+    speechPrimed: false,
     audioCtx: null,
     wakeLockSentinel: null,
     wakeLockDesired: false,
@@ -68,7 +71,7 @@
     hasCalendarWriteScope: false,
     pendingEventToCreate: null,
     calendarMode: 'disconnected', // 'disconnected' | 'google' | 'demo'
-    agendaRange: 'day', // 'day' | 'week' (widget)
+    agendaRange: 'week', // 'day' | 'week' (widget)
     modalAgendaRange: 'week', // 'day' | 'week' (modal expandido)
     todayEvents: [],
     weekEvents: [],
@@ -79,11 +82,15 @@
     serverGoogleClientId: '',
     recognition: null,
     forceStopListening: null,
+    continuousMode: false, // Começa DESATIVADO por padrão
     conversationActive: false,
     autoListenTimer: null,
+    speechStartTimer: null,
+    activeUtterance: null,
     finalTranscript: '',
     lastReply: '',
     chatHistory: [],
+    uiMessages: [],
     availableVoices: [],
     currentAbortController: null,
     ttsAbortController: null,
@@ -121,14 +128,15 @@
     nextEventChipText: document.getElementById('nextEventChipText'),
 
     // Assistente
+    assistantPanel: document.getElementById('assistantPanel'),
     micBtn: document.getElementById('micBtn'),
+    summaryBtn: document.getElementById('summaryBtn'),
+    continuousModeBtn: document.getElementById('continuousModeBtn'),
+    stopVoiceBtn: document.getElementById('stopVoiceBtn'),
     assistantStatus: document.getElementById('assistantStatus'),
-    fluidModeBtn: document.getElementById('fluidModeBtn'),
-    quickPrompts: document.getElementById('quickPrompts'),
-    responseCard: document.getElementById('responseCard'),
     responseModelLabel: document.getElementById('responseModelLabel'),
-    userTranscript: document.getElementById('userTranscript'),
-    assistantReply: document.getElementById('assistantReply'),
+    chatMessages: document.getElementById('chatMessages'),
+    chatEmptyState: document.getElementById('chatEmptyState'),
     replayVoiceBtn: document.getElementById('replayVoiceBtn'),
     clearResponseBtn: document.getElementById('clearResponseBtn'),
     textForm: document.getElementById('textForm'),
@@ -327,16 +335,65 @@
     }, duration);
   }
 
-  function setResponseCardVisible(visible) {
-    el.responseCard.classList.toggle('hidden', !visible);
-    el.body.classList.toggle('has-response', Boolean(visible));
-    syncVoiceActiveClass();
+  function renderChatMessages() {
+    if (!el.chatMessages) return;
+    if (!state.uiMessages.length) {
+      el.chatMessages.innerHTML = `
+        <div class="chat-empty-state" id="chatEmptyState">
+          <p class="chat-empty-title">Como posso ajudar hoje?</p>
+          <p class="chat-empty-sub">Toque no microfone, clique em <strong>Resumo</strong> ou digite sua pergunta abaixo.</p>
+        </div>
+      `;
+      return;
+    }
+
+    el.chatMessages.innerHTML = state.uiMessages
+      .map((msg) => {
+        const isUser = msg.role === 'user';
+        const label = isUser ? 'Você' : 'Smart Dock';
+        const classes = ['chat-bubble', isUser ? 'user' : 'assistant', msg.isError ? 'is-error' : '']
+          .filter(Boolean)
+          .join(' ');
+        return `
+          <div class="${classes}">
+            <div class="chat-bubble-meta">
+              <span>${label}</span>
+              ${msg.time ? `<span>${escapeHtml(msg.time)}</span>` : ''}
+            </div>
+            <p class="chat-bubble-text">${escapeHtml(msg.text)}</p>
+          </div>
+        `;
+      })
+      .join('');
+
+    el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
   }
 
-  function syncVoiceActiveClass() {
-    const active =
-      state.assistantState !== 'idle' || !el.responseCard.classList.contains('hidden');
-    el.body.classList.toggle('voice-active', active);
+  function appendUiMessage(role, text, options = {}) {
+    const time = new Intl.DateTimeFormat('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date());
+    const msg = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      role,
+      text: String(text || ''),
+      time,
+      isError: Boolean(options.isError),
+    };
+    state.uiMessages.push(msg);
+    if (state.uiMessages.length > 24) {
+      state.uiMessages = state.uiMessages.slice(-24);
+    }
+    renderChatMessages();
+    return msg;
+  }
+
+  function updateUiMessage(msgRef, newText, isError = false) {
+    if (!msgRef) return;
+    msgRef.text = String(newText || '');
+    msgRef.isError = Boolean(isError);
+    renderChatMessages();
   }
 
   function isAnyModalOpen() {
@@ -355,27 +412,25 @@
     }
   }
 
-  function updateFluidModeUI() {
-    if (!el.fluidModeBtn) return;
-    el.fluidModeBtn.setAttribute('aria-pressed', String(Boolean(state.prefs.continuousVoice)));
+  function updateContinuousModeUI() {
+    if (!el.continuousModeBtn) return;
+    el.continuousModeBtn.setAttribute('aria-pressed', String(Boolean(state.continuousMode)));
   }
 
-  function setAssistantState(newState, statusMessage) {
+  function setAssistantState(newState, statusMessage, isError = false) {
     state.assistantState = newState;
     el.body.dataset.state = newState;
-    syncVoiceActiveClass();
     if (!el.assistantStatus) return;
-    if (statusMessage !== undefined) {
-      el.assistantStatus.textContent = statusMessage;
-    } else {
-      const defaultLabels = {
-        idle: '',
-        listening: '',
-        thinking: '',
-        speaking: '',
-      };
-      el.assistantStatus.textContent = defaultLabels[newState] || '';
-    }
+
+    const defaultLabels = {
+      idle: 'Pronto para ouvir',
+      listening: 'Ouvindo...',
+      thinking: 'Consultando Gemini...',
+      speaking: 'Falando...',
+    };
+    el.assistantStatus.textContent =
+      statusMessage !== undefined ? statusMessage : defaultLabels[newState] || '';
+    el.assistantStatus.classList.toggle('is-error', Boolean(isError));
   }
 
   function escapeHtml(str) {
@@ -390,8 +445,8 @@
   // --------------------------------------------------------------------------
   // Compatibilidade iOS: Desbloqueio de Áudio e TTS no Primeiro Toque
   // --------------------------------------------------------------------------
-  function unlockAudioOnFirstGesture() {
-    if (state.audioUnlocked) return;
+  function unlockAudioOnFirstGesture(options = {}) {
+    const primeSpeech = options.primeSpeech !== false;
 
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -402,43 +457,47 @@
         if (state.audioCtx.state === 'suspended') {
           state.audioCtx.resume().catch(() => {});
         }
-        const buffer = state.audioCtx.createBuffer(1, 1, 22050);
-        const source = state.audioCtx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(state.audioCtx.destination);
-        source.start(0);
+        if (!state.audioUnlocked) {
+          const buffer = state.audioCtx.createBuffer(1, 1, 22050);
+          const source = state.audioCtx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(state.audioCtx.destination);
+          source.start(0);
+        }
       }
 
-      if ('speechSynthesis' in window) {
+      if (primeSpeech && !state.speechPrimed && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
         const primer = new SpeechSynthesisUtterance(' ');
         primer.lang = 'pt-BR';
         primer.volume = 0;
         primer.rate = 10;
         window.speechSynthesis.speak(primer);
+        state.speechPrimed = true;
       }
 
       state.audioUnlocked = true;
-      el.audioUnlockPill.classList.add('unlocked');
+      el.audioUnlockPill?.classList.add('unlocked');
     } catch (err) {
       console.warn('Erro ao desbloquear áudio:', err);
     }
   }
 
   function setupAudioUnlockListeners() {
-    const events = ['touchstart', 'pointerdown', 'click'];
+    const events = ['touchstart', 'pointerdown', 'click', 'keydown'];
     const handler = (evt) => {
-      // Se o primeiro toque for direto no microfone, não dispara speechSynthesis/AudioContext
+      const isMicTap = Boolean(evt?.target?.closest && evt.target.closest('#micBtn'));
+      // No toque direto no microfone, desbloqueia AudioContext mas não dispara speechSynthesis
       // simultaneamente para não disputar a sessão de áudio com o SpeechRecognition no iOS
-      if (evt?.target?.closest && evt.target.closest('#micBtn')) {
-        return;
+      unlockAudioOnFirstGesture({ primeSpeech: !isMicTap });
+      if (state.audioUnlocked && state.speechPrimed) {
+        events.forEach((e) => window.removeEventListener(e, handler, true));
       }
-      unlockAudioOnFirstGesture();
-      events.forEach((e) => window.removeEventListener(e, handler, true));
     };
     events.forEach((evt) => window.addEventListener(evt, handler, { capture: true, passive: true }));
 
-    el.audioUnlockPill.addEventListener('click', () => {
-      unlockAudioOnFirstGesture();
+    el.audioUnlockPill?.addEventListener('click', () => {
+      unlockAudioOnFirstGesture({ primeSpeech: true });
       playChime('start');
       showToast('Áudio e voz ativados!', 'success', 2000);
     });
@@ -1386,7 +1445,6 @@
       window.matchMedia('(display-mode: standalone)').matches ||
       window.navigator.standalone === true;
 
-    // Se já estiver aberto como App na Tela de Início (tela cheia real no iOS), oculta o botão
     if (isStandalone) {
       el.fullscreenBtn.classList.add('hidden');
       return;
@@ -1404,7 +1462,6 @@
 
     el.fullscreenBtn.addEventListener('click', async () => {
       if (!isFsSupported) {
-        // iPhone Safari não implementa Fullscreen API em abas comuns -> mostra guia de Tela de Início
         openIosFullscreenGuide();
         return;
       }
@@ -1699,7 +1756,6 @@
     if (!val) return null;
     if (val instanceof Date) return Number.isNaN(val.getTime()) ? null : val;
     const str = String(val).trim();
-    // Se vier no formato YYYY-MM-DD (dia todo)
     if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
       return parseLocalAllDayDate(str);
     }
@@ -1875,7 +1931,7 @@
     }
     if (el.agendaHeaderSub) {
       el.agendaHeaderSub.textContent =
-        state.agendaRange === 'week' ? 'Próximos 7 dias · toque para expandir' : 'Hoje · toque para expandir';
+        state.agendaRange === 'week' ? 'Hoje e próximos 7 dias · toque para expandir' : 'Hoje · toque para expandir';
     }
     if (state.calendarMode !== 'disconnected') {
       renderEventsList();
@@ -1888,7 +1944,6 @@
     const events = isWeek ? state.weekEvents : state.todayEvents;
     el.eventCountBadge.textContent = String(events.length);
 
-    // Chip de próximo evento no relógio sempre usa o próximo compromisso mais próximo
     const nextEvt = state.todayEvents[0] || state.weekEvents[0];
     if (nextEvt) {
       const isNextToday = getLocalDateKey(nextEvt.startDate) === getLocalDateKey(now);
@@ -1912,21 +1967,30 @@
 
     setAgendaView('list');
 
-    if (!isWeek) {
-      el.eventsList.innerHTML = events.map((evt) => renderEventItemHtml(evt, now)).join('');
-      return;
-    }
-
-    // Modo Semana: agrupa eventos por dia com divisórias
-    let lastDayKey = '';
-    const chunks = [];
+    // Lista estruturada estilo calendário (dia da semana, data, horários de início/fim e título)
+    const todayKey = getLocalDateKey(now);
+    const grouped = new Map();
     for (const evt of events) {
       const dayKey = getLocalDateKey(evt.startDate);
-      if (dayKey !== lastDayKey) {
-        lastDayKey = dayKey;
-        chunks.push(`<li class="event-day-divider">${escapeHtml(formatDayHeading(evt.startDate))}</li>`);
+      if (!grouped.has(dayKey)) {
+        grouped.set(dayKey, { date: evt.startDate, items: [] });
       }
-      chunks.push(renderEventItemHtml(evt, now));
+      grouped.get(dayKey).items.push(evt);
+    }
+
+    const chunks = [];
+    for (const [dayKey, group] of grouped.entries()) {
+      const isTodayGroup = dayKey === todayKey;
+      const countLabel = `${group.items.length} ${group.items.length === 1 ? 'evento' : 'eventos'}`;
+      chunks.push(`
+        <li class="calendar-day-header ${isTodayGroup ? 'is-today' : ''}">
+          <span class="calendar-day-header-left">${escapeHtml(formatDayHeading(group.date))}</span>
+          <span class="calendar-day-badge">${countLabel}</span>
+        </li>
+      `);
+      for (const evt of group.items) {
+        chunks.push(renderEventItemHtml(evt, now));
+      }
     }
     el.eventsList.innerHTML = chunks.join('');
   }
@@ -1969,7 +2033,6 @@
       return;
     }
 
-    // Visualização completa dos próximos 7 dias em cards
     const daysHtml = [];
     for (let offset = 0; offset < 7; offset++) {
       const dayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
@@ -1998,7 +2061,6 @@
   function openAgendaExpandedModal(initialRange = 'week') {
     state.modalAgendaRange = initialRange;
     el.newEventForm.classList.add('hidden');
-    // Pré-preenche data de hoje no formulário rápido
     const now = new Date();
     el.newEventDate.value = getLocalDateKey(now);
     const nextHour = (now.getHours() + 1) % 24;
@@ -2135,7 +2197,7 @@
   }
 
   // --------------------------------------------------------------------------
-  // 3. Assistente de Voz: SpeechRecognition + Gemini 2.5 Flash + SpeechSynthesis
+  // 3. Assistente de Voz: SpeechRecognition + Gemini + SpeechSynthesis
   // --------------------------------------------------------------------------
   function loadVoices() {
     if (!('speechSynthesis' in window)) return;
@@ -2183,13 +2245,14 @@
   function sanitizeTextForSpeech(text) {
     return String(text || '')
       .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/[*_`#~>]/g, '')
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/^\s*[-•*+]\s+/gm, '')
+      .replace(/[*_`#~>]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
   }
 
-  function splitIntoSpeechChunks(text, maxLen = 190) {
+  function splitIntoSpeechChunks(text, maxLen = 180) {
     const clean = sanitizeTextForSpeech(text);
     if (!clean) return [];
     const sentences = clean.match(/[^.!?]+[.!?]*\s*/g) || [clean];
@@ -2245,13 +2308,13 @@
     view.setUint32(4, 36 + pcmBytes.byteLength, true);
     writeStr(8, 'WAVE');
     writeStr(12, 'fmt ');
-    view.setUint32(16, 16, true); // PCM chunk size
-    view.setUint16(20, 1, true); // PCM format
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
     view.setUint16(22, channels, true);
     view.setUint32(24, sampleRate, true);
     view.setUint32(28, byteRate, true);
     view.setUint16(32, blockAlign, true);
-    view.setUint16(34, 16, true); // 16-bit
+    view.setUint16(34, 16, true);
     writeStr(36, 'data');
     view.setUint32(40, pcmBytes.byteLength, true);
     return new Blob([header, pcmBytes], { type: 'audio/wav' });
@@ -2309,42 +2372,63 @@
     }
   }
 
-  function stopSpeaking(keepConversation = false) {
+  function stopSpeaking(keepConversation = false, customStatus) {
     state.speechQueueId += 1;
     cancelAutoListenTimer();
+    if (state.speechStartTimer) {
+      clearTimeout(state.speechStartTimer);
+      state.speechStartTimer = null;
+    }
+    state.activeUtterance = null;
     if (!keepConversation) {
       state.conversationActive = false;
     }
     cleanupActiveAudio();
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // Ignora
+      }
     }
-    if (state.assistantState === 'speaking') {
-      setAssistantState('idle');
+    if (state.assistantState === 'speaking' || customStatus !== undefined) {
+      setAssistantState('idle', customStatus !== undefined ? customStatus : 'Pronto para ouvir');
     }
   }
 
   function handleSpeechFinished(queueId) {
     if (queueId !== state.speechQueueId) return;
-    setAssistantState('idle');
+    state.activeUtterance = null;
+    setAssistantState('idle', 'Pronto para ouvir');
 
-    // Conversa contínua: dá um toquezinho suave e reabre o microfone automaticamente
-    // após a IA terminar de falar. Se o usuário ficar em silêncio, encerra sozinho.
-    if (state.conversationActive && !isAnyModalOpen()) {
+    // Conversa contínua: SÓ reabre automaticamente se a chave "Conversa Contínua" estiver ATIVADA
+    if (state.continuousMode && state.conversationActive && !isAnyModalOpen()) {
       cancelAutoListenTimer();
       state.autoListenTimer = setTimeout(() => {
-        if (state.assistantState !== 'idle' || !state.conversationActive || isAnyModalOpen()) {
+        if (
+          state.assistantState !== 'idle' ||
+          !state.continuousMode ||
+          !state.conversationActive ||
+          isAnyModalOpen()
+        ) {
           state.autoListenTimer = null;
           return;
         }
         playChime('turn');
         state.autoListenTimer = setTimeout(() => {
           state.autoListenTimer = null;
-          if (state.assistantState === 'idle' && state.conversationActive && !isAnyModalOpen()) {
+          if (
+            state.assistantState === 'idle' &&
+            state.continuousMode &&
+            state.conversationActive &&
+            !isAnyModalOpen()
+          ) {
             startVoiceRecognition(true, 0);
           }
-        }, 230);
+        }, 240);
       }, 320);
+    } else {
+      state.conversationActive = false;
     }
   }
 
@@ -2478,7 +2562,7 @@
           source.playbackRate.value = rate;
           source.connect(state.audioCtx.destination);
           state.activeAudioSource = source;
-          setAssistantState('speaking');
+          setAssistantState('speaking', 'Falando...');
 
           source.onended = () => {
             if (state.activeAudioSource === source) {
@@ -2506,7 +2590,7 @@
       htmlAudio.playbackRate = rate;
       state.activeAudioUrl = url;
       state.activeHtmlAudio = htmlAudio;
-      setAssistantState('speaking');
+      setAssistantState('speaking', 'Falando...');
 
       htmlAudio.onended = () => {
         cleanupActiveAudio();
@@ -2515,7 +2599,7 @@
       htmlAudio.onerror = () => {
         cleanupActiveAudio();
         if (queueId === state.speechQueueId) {
-          setAssistantState('idle');
+          setAssistantState('idle', 'Pronto para ouvir');
         }
       };
 
@@ -2534,17 +2618,22 @@
       return;
     }
 
-    const chunks = splitIntoSpeechChunks(cleanText);
+    const chunks = splitIntoSpeechChunks(cleanText, 180);
     if (!chunks.length) {
       handleSpeechFinished(queueId);
       return;
     }
 
-    window.speechSynthesis.cancel();
-    const voice = pickBestPortugueseVoice();
-    const rate = Number(state.prefs.speechRate) || 1.0;
+    const synth = window.speechSynthesis;
+    const wasBusy = synth.speaking || synth.pending;
+    try {
+      synth.cancel();
+    } catch {
+      // Ignora
+    }
 
-    setAssistantState('speaking');
+    const rate = Math.min(1.4, Math.max(0.8, Number(state.prefs.speechRate) || 1.0));
+    setAssistantState('speaking', 'Falando...');
 
     const speakNext = (index) => {
       if (queueId !== state.speechQueueId) return;
@@ -2553,38 +2642,83 @@
         return;
       }
 
+      const voice = pickBestPortugueseVoice();
       const utterance = new SpeechSynthesisUtterance(chunks[index]);
-      utterance.lang = voice?.lang || 'pt-BR';
-      if (voice) utterance.voice = voice;
+      utterance.lang = 'pt-BR';
+      if (voice) {
+        utterance.voice = voice;
+        if (voice.lang) utterance.lang = voice.lang;
+      }
       utterance.rate = rate;
       utterance.pitch = 1.0;
 
-      utterance.onend = () => speakNext(index + 1);
+      // Mantém referência forte para evitar bug de GC no Chrome
+      state.activeUtterance = utterance;
+
+      utterance.onend = () => {
+        if (state.activeUtterance === utterance) {
+          state.activeUtterance = null;
+        }
+        speakNext(index + 1);
+      };
+
       utterance.onerror = (evt) => {
+        if (state.activeUtterance === utterance) {
+          state.activeUtterance = null;
+        }
         if (evt.error !== 'interrupted' && evt.error !== 'canceled') {
           console.warn('Erro SpeechSynthesis:', evt.error);
+          if (evt.error === 'not-allowed') {
+            showToast('Toque em "Ativar áudio" ou no botão de ouvir para liberar a fala neste navegador.', 'info', 4000);
+          }
         }
         if (queueId === state.speechQueueId) {
-          setAssistantState('idle');
+          setAssistantState('idle', 'Pronto para ouvir');
         }
       };
 
-      window.speechSynthesis.speak(utterance);
+      try {
+        if (synth.paused) {
+          synth.resume();
+        }
+        synth.speak(utterance);
+      } catch (err) {
+        console.warn('Falha ao chamar speechSynthesis.speak:', err);
+        if (queueId === state.speechQueueId) {
+          setAssistantState('idle', 'Pronto para ouvir');
+        }
+      }
     };
 
-    speakNext(0);
+    // Pequeno atraso após cancel() evita bug conhecido do Chrome/Safari que cancela a nova fala
+    if (state.speechStartTimer) {
+      clearTimeout(state.speechStartTimer);
+      state.speechStartTimer = null;
+    }
+    state.speechStartTimer = setTimeout(() => {
+      state.speechStartTimer = null;
+      speakNext(0);
+    }, wasBusy ? 75 : 35);
   }
 
   async function speakText(text) {
     const cleanText = sanitizeTextForSpeech(text);
     if (!cleanText) {
-      setAssistantState('idle');
+      setAssistantState('idle', 'Pronto para ouvir');
       return;
     }
 
     cleanupActiveAudio();
+    if (state.speechStartTimer) {
+      clearTimeout(state.speechStartTimer);
+      state.speechStartTimer = null;
+    }
     if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+      try {
+        window.speechSynthesis.cancel();
+      } catch {
+        // Ignora
+      }
     }
 
     const queueId = ++state.speechQueueId;
@@ -2593,7 +2727,7 @@
     if (wantGeminiVoice) {
       const ttsController = new AbortController();
       state.ttsAbortController = ttsController;
-      setAssistantState('speaking', 'Preparando voz natural...');
+      setAssistantState('speaking', 'Preparando voz...');
 
       try {
         const voiceName = state.prefs.geminiVoiceName || 'Aoede';
@@ -2612,7 +2746,7 @@
           state.ttsAbortController = null;
         }
         if (queueId !== state.speechQueueId) return;
-        console.warn('Gemini TTS indisponível, usando voz local como fallback:', err?.message || err);
+        console.warn('Gemini TTS indisponível, usando voz local pt-BR:', err?.message || err);
       }
     }
 
@@ -2624,7 +2758,7 @@
     const autoFollowUp = isAutoFollowUp === true;
     cancelAutoListenTimer();
 
-    // Se já estiver ouvindo, encerra imediatamente e envia o que foi captado
+    // Se já estiver ouvindo, encerra imediatamente sem travar o estado
     if (state.assistantState === 'listening') {
       if (typeof state.forceStopListening === 'function') {
         state.forceStopListening();
@@ -2632,10 +2766,10 @@
         try {
           state.recognition.stop();
         } catch {
-          setAssistantState('idle');
+          setAssistantState('idle', 'Pronto para ouvir');
         }
       } else {
-        setAssistantState('idle');
+        setAssistantState('idle', 'Pronto para ouvir');
       }
       return;
     }
@@ -2646,17 +2780,18 @@
       state.currentAbortController._userCancelled = true;
       state.currentAbortController.abort();
       state.currentAbortController = null;
-      setAssistantState('idle');
+      setAssistantState('idle', 'Consulta cancelada.');
       showToast('Consulta cancelada.', 'info', 2000);
       return;
     }
 
-    // Se estiver falando e o usuário tocar no microfone, interrompe a fala e já começa a ouvir imediatamente!
+    // Se estiver falando e o usuário tocar no microfone, interrompe a fala e já começa a ouvir
     if (state.assistantState === 'speaking') {
       stopSpeaking(true);
     }
 
     if (!hasGeminiAccess()) {
+      setAssistantState('idle', 'Configure sua GEMINI_API_KEY nos Ajustes.', true);
       showToast('Configure sua GEMINI_API_KEY antes de usar o assistente.', 'error', 4000);
       openSettingsModal('geminiKeyInput');
       return;
@@ -2664,27 +2799,28 @@
 
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRec) {
-      showToast('Reconhecimento de voz não suportado neste navegador. Use o campo de texto abaixo.', 'error', 4500);
-      el.textInput.focus();
+      const unsupportedMsg = 'Reconhecimento de voz não suportado neste navegador. Use o campo de texto.';
+      setAssistantState('idle', unsupportedMsg, true);
+      showToast(unsupportedMsg, 'error', 4500);
+      el.textInput?.focus();
       return;
     }
 
-    // Sempre ativa conversa contínua quando iniciada pelo microfone
+    // Conversa contínua SÓ fica ativa se a chave estiver ligada
     if (!autoFollowUp) {
-      state.conversationActive = true;
+      state.conversationActive = Boolean(state.continuousMode);
     }
 
-    // Para qualquer síntese de fala ativa sem tocar chime/AudioContext durante a abertura do microfone
-    stopSpeaking(true);
-    if (!state.audioUnlocked) {
-      state.audioUnlocked = true;
-      el.audioUnlockPill.classList.add('unlocked');
-    }
+    // Para síntese ativa e garante AudioContext sem travar SpeechRecognition no iOS
+    stopSpeaking(state.conversationActive);
+    unlockAudioOnFirstGesture({ primeSpeech: false });
 
-    // Garante que nenhuma instância antiga ficou presa
+    // Limpa qualquer instância anterior presa
     if (state.recognition) {
       try {
+        state.recognition.onstart = null;
         state.recognition.onresult = null;
+        state.recognition.onnomatch = null;
         state.recognition.onerror = null;
         state.recognition.onend = null;
         state.recognition.abort();
@@ -2694,62 +2830,70 @@
       state.recognition = null;
     }
 
-    const SILENCE_AUTO_STOP_MS = 1600; // Para automaticamente 1,6s após você terminar de falar
-    const SPEECH_END_GRACE_MS = 450;   // Encerra rápido quando o navegador detecta fim de fala
-    const INITIAL_NO_SPEECH_MS = autoFollowUp ? 5500 : 8000;
-    const STOP_FALLBACK_MS = 750;      // Fallback caso o Safari não dispare onend após stop()
-
+    // Configuração exata por turno para máxima confiabilidade em pt-BR (inclusive frases curtas como "Bom dia")
     const recognition = new SpeechRec();
     recognition.lang = 'pt-BR';
-    recognition.interimResults = true;
-    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.continuous = false;
     recognition.maxAlternatives = 1;
 
     state.recognition = recognition;
     state.finalTranscript = '';
-    let latestTranscript = '';
-    let silenceTimer = null;
-    let initialTimer = null;
+
+    const NO_SPEECH_TIMEOUT_MS = autoFollowUp ? 5500 : 9000;
+    const STOP_FALLBACK_MS = 850;
+    let capturedTranscript = '';
+    let noSpeechTimer = null;
     let stopFallbackTimer = null;
-    let hasStopped = false;
     let isFinalized = false;
+    let manualStop = false;
     const startedAt = Date.now();
 
     const clearAllTimers = () => {
-      if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
-      if (initialTimer) { clearTimeout(initialTimer); initialTimer = null; }
+      if (noSpeechTimer) { clearTimeout(noSpeechTimer); noSpeechTimer = null; }
       if (stopFallbackTimer) { clearTimeout(stopFallbackTimer); stopFallbackTimer = null; }
     };
 
-    const finalizeListening = (skipGemini = false) => {
-      if (isFinalized) return;
-      isFinalized = true;
-      clearAllTimers();
-      state.forceStopListening = null;
-
+    const detachRecognition = () => {
+      try {
+        recognition.onstart = null;
+        recognition.onresult = null;
+        recognition.onnomatch = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+      } catch {
+        // Ignora
+      }
       if (state.recognition === recognition) {
         state.recognition = null;
       }
+      state.forceStopListening = null;
+    };
 
-      const question = (latestTranscript || state.finalTranscript).trim();
+    const finalizeListening = (skipGemini = false, idleStatus, isError = false) => {
+      if (isFinalized) return;
+      isFinalized = true;
+      clearAllTimers();
+      detachRecognition();
+
+      const question = (capturedTranscript || state.finalTranscript || '').trim();
       if (!skipGemini && question) {
         askGemini(question, { fromVoice: true });
       } else {
         if (autoFollowUp) {
           state.conversationActive = false;
         }
-        if (state.assistantState === 'listening') {
-          setAssistantState('idle');
-          if (!state.lastReply) {
-            setResponseCardVisible(false);
-          }
-        }
+        setAssistantState(
+          'idle',
+          idleStatus !== undefined ? idleStatus : 'Pronto para ouvir',
+          isError
+        );
       }
     };
 
-    const triggerAutoStop = () => {
-      if (hasStopped || isFinalized) return;
-      hasStopped = true;
+    const triggerStop = () => {
+      if (isFinalized) return;
+      manualStop = true;
       clearAllTimers();
       try {
         recognition.stop();
@@ -2763,143 +2907,160 @@
       }, STOP_FALLBACK_MS);
     };
 
-    state.forceStopListening = triggerAutoStop;
+    state.forceStopListening = triggerStop;
 
     recognition.onstart = () => {
-      setAssistantState('listening');
-      setResponseCardVisible(true);
-      el.userTranscript.classList.remove('hidden');
-      if (!autoFollowUp) {
-        el.userTranscript.textContent = 'Ouvindo...';
-        el.assistantReply.textContent = '';
-      } else {
-        el.userTranscript.textContent = 'Ouvindo...';
-      }
+      if (isFinalized) return;
+      setAssistantState('listening', autoFollowUp ? 'Sua vez — pode falar...' : 'Ouvindo... fale agora');
 
-      // Se nada for falado no tempo limite, corta o microfone automaticamente
-      initialTimer = setTimeout(() => {
-        if (!latestTranscript.trim()) {
+      // Se o usuário não falar nada dentro do tempo limite, corta o microfone automaticamente
+      noSpeechTimer = setTimeout(() => {
+        if (!capturedTranscript.trim() && !isFinalized) {
           if (autoFollowUp) {
             state.conversationActive = false;
           }
-          triggerAutoStop();
+          try {
+            recognition.abort();
+          } catch {
+            // Ignora
+          }
+          finalizeListening(
+            true,
+            autoFollowUp
+              ? 'Silêncio detectado — microfone desligado.'
+              : 'Nenhuma fala detectada. Toque no microfone para tentar novamente.',
+            false
+          );
         }
-      }, INITIAL_NO_SPEECH_MS);
+      }, NO_SPEECH_TIMEOUT_MS);
     };
 
     recognition.onresult = (event) => {
-      let fullText = '';
-      let finalOnly = '';
+      if (isFinalized) return;
+      let transcript = '';
       for (let i = 0; i < event.results.length; i++) {
-        const res = event.results[i];
-        const piece = res[0]?.transcript || '';
-        fullText += piece;
-        if (res.isFinal) {
-          finalOnly += piece;
-        }
+        const piece = event.results[i]?.[0]?.transcript || '';
+        transcript += (transcript ? ' ' : '') + piece.trim();
       }
+      transcript = transcript.trim();
+      if (!transcript) return;
 
-      state.finalTranscript = finalOnly.trim();
-      latestTranscript = fullText.trim();
+      capturedTranscript = transcript;
+      state.finalTranscript = transcript;
+      clearAllTimers();
 
-      if (latestTranscript) {
-        if (initialTimer) {
-          clearTimeout(initialTimer);
-          initialTimer = null;
-        }
-        el.userTranscript.textContent = `“${latestTranscript}”`;
-
-        if (silenceTimer) clearTimeout(silenceTimer);
-        silenceTimer = setTimeout(() => {
-          triggerAutoStop();
-        }, SILENCE_AUTO_STOP_MS);
+      // Envia imediatamente para o Gemini junto com agenda real (hoje/semana) e clima atual
+      try {
+        recognition.stop();
+      } catch {
+        // Ignora
       }
+      finalizeListening(false);
     };
 
-    recognition.onspeechend = () => {
-      if (latestTranscript.trim() && !hasStopped) {
-        if (silenceTimer) clearTimeout(silenceTimer);
-        silenceTimer = setTimeout(() => {
-          triggerAutoStop();
-        }, SPEECH_END_GRACE_MS);
-      }
+    recognition.onnomatch = () => {
+      if (isFinalized) return;
+      state.conversationActive = false;
+      finalizeListening(
+        true,
+        'Não consegui entender. Toque no microfone para falar novamente.',
+        true
+      );
     };
 
     recognition.onerror = (event) => {
-      console.warn('SpeechRecognition error:', event.error);
-      if (latestTranscript.trim() && (event.error === 'no-speech' || event.error === 'aborted')) {
+      if (isFinalized) return;
+      const errCode = event?.error || 'unknown';
+      console.warn('SpeechRecognition error:', errCode);
+
+      if (capturedTranscript.trim() && (errCode === 'no-speech' || errCode === 'aborted')) {
         finalizeListening(false);
         return;
       }
 
-      // Se o navegador abortou logo após o áudio da IA terminar, tenta reabrir 1 vez automaticamente
+      // Em modo contínuo, se o navegador abortar logo após o áudio da IA terminar, tenta 1 vez
       if (
         autoFollowUp &&
+        state.continuousMode &&
         retryCount < 1 &&
         Date.now() - startedAt < 900 &&
-        (event.error === 'aborted' || event.error === 'audio-capture')
+        (errCode === 'aborted' || errCode === 'audio-capture')
       ) {
         isFinalized = true;
         clearAllTimers();
-        state.forceStopListening = null;
-        if (state.recognition === recognition) state.recognition = null;
-        setAssistantState('idle');
+        detachRecognition();
+        setAssistantState('idle', 'Preparando microfone...');
         state.autoListenTimer = setTimeout(() => {
           state.autoListenTimer = null;
-          if (state.conversationActive && !isAnyModalOpen()) {
+          if (state.continuousMode && state.conversationActive && !isAnyModalOpen()) {
             startVoiceRecognition(true, retryCount + 1);
           }
         }, 380);
         return;
       }
 
-      if (autoFollowUp && (event.error === 'no-speech' || event.error === 'aborted' || event.error === 'not-allowed')) {
+      if (autoFollowUp && (errCode === 'no-speech' || errCode === 'aborted')) {
         state.conversationActive = false;
-        finalizeListening(true);
+        finalizeListening(true, 'Silêncio detectado — microfone desligado.', false);
+        return;
+      }
+
+      if (manualStop && errCode === 'aborted') {
+        finalizeListening(true, 'Microfone pausado.', false);
         return;
       }
 
       const errorMessages = {
-        'not-allowed': 'Permissão de microfone negada. Libere o microfone nas configurações do navegador.',
-        'service-not-allowed': 'Serviço de voz bloqueado no dispositivo.',
-        'no-speech': 'Não ouvi nenhuma fala. Tente novamente falando mais perto.',
-        'audio-capture': 'Nenhum microfone encontrado ou em uso por outro app.',
-        network: 'Erro de rede no reconhecimento de voz do navegador.',
+        'not-allowed': 'Permissão de microfone negada. Libere o acesso no navegador e toque para tentar novamente.',
+        'service-not-allowed': 'Reconhecimento de voz bloqueado neste dispositivo. Verifique as permissões.',
+        'no-speech': 'Nenhuma fala detectada. Toque no microfone e fale mais perto.',
+        'audio-capture': 'Microfone não encontrado ou ocupado por outro aplicativo.',
+        network: 'Erro de rede no reconhecimento de voz. Verifique a conexão e tente novamente.',
       };
-      const msg = errorMessages[event.error] || (event.error !== 'aborted' ? `Erro no microfone: ${event.error}` : '');
-      if (msg) {
+
+      const msg =
+        errorMessages[errCode] ||
+        (errCode !== 'aborted'
+          ? `Erro no microfone (${errCode}). Toque para tentar novamente.`
+          : 'Pronto para ouvir');
+
+      const isRealError = errCode !== 'aborted';
+      if (isRealError) {
         showToast(msg, 'error', 4200);
       }
       state.conversationActive = false;
-      finalizeListening(true);
+      finalizeListening(true, msg, isRealError);
     };
 
     recognition.onend = () => {
-      finalizeListening(false);
+      if (!isFinalized) {
+        finalizeListening(false);
+      }
     };
 
     try {
+      setAssistantState('listening', 'Iniciando microfone...');
       recognition.start();
     } catch (err) {
       console.error('Erro ao iniciar SpeechRecognition:', err);
       clearAllTimers();
-      state.recognition = null;
-      state.forceStopListening = null;
-      if (autoFollowUp && retryCount < 1) {
-        setAssistantState('idle');
+      detachRecognition();
+      if (autoFollowUp && state.continuousMode && retryCount < 1) {
+        setAssistantState('idle', 'Preparando microfone...');
         state.autoListenTimer = setTimeout(() => {
           state.autoListenTimer = null;
-          if (state.conversationActive && !isAnyModalOpen()) {
+          if (state.continuousMode && state.conversationActive && !isAnyModalOpen()) {
             startVoiceRecognition(true, retryCount + 1);
           }
         }, 350);
         return;
       }
       state.conversationActive = false;
+      const failMsg = 'Não foi possível iniciar o microfone. Toque novamente para tentar.';
       if (!autoFollowUp) {
-        showToast('Não foi possível iniciar o microfone. Recarregue a página e tente novamente.', 'error', 3800);
+        showToast(failMsg, 'error', 3800);
       }
-      setAssistantState('idle');
+      setAssistantState('idle', failMsg, !autoFollowUp);
     }
   }
 
@@ -2933,6 +3094,7 @@
       lower.includes('deprecated') ||
       lower.includes('not supported') ||
       lower.includes('overloaded') ||
+      lower.includes('high demand') ||
       lower.includes('unavailable') ||
       lower.includes('rate limit') ||
       lower.includes('quota')
@@ -2993,20 +3155,41 @@
     return { cleanedText: cleaned.trim(), actions };
   }
 
+  async function triggerMorningBriefing() {
+    unlockAudioOnFirstGesture({ primeSpeech: true });
+    if (!hasGeminiAccess()) {
+      setAssistantState('idle', 'Configure sua GEMINI_API_KEY nos Ajustes.', true);
+      showToast('Configure sua GEMINI_API_KEY nos Ajustes para gerar o resumo.', 'error', 4000);
+      openSettingsModal('geminiKeyInput');
+      return;
+    }
+
+    if (!state.weatherData) {
+      setAssistantState('thinking', 'Atualizando clima...');
+      await fetchWeather(true);
+    }
+
+    askGemini(BRIEFING_PROMPT, {
+      fromVoice: false,
+      displayQuestion: 'Resumo do dia (Bom dia)',
+    });
+  }
+
   async function askGemini(question, options = {}) {
     const fromVoice = Boolean(options.fromVoice);
+    const displayQuestion = options.displayQuestion || question;
     const apiKey = getGeminiKey();
     const useServerProxy = !apiKey && state.serverGeminiConfigured;
 
     if (!apiKey && !useServerProxy) {
+      setAssistantState('idle', 'Configure sua GEMINI_API_KEY nos Ajustes.', true);
       showToast('Configure sua GEMINI_API_KEY nos Ajustes.', 'error', 4000);
       openSettingsModal('geminiKeyInput');
       return;
     }
 
-    if (!fromVoice) {
-      state.conversationActive = false;
-    }
+    // Conversa contínua só permanece ativa se a chave estiver ligada e o turno vier da voz
+    state.conversationActive = Boolean(fromVoice && state.continuousMode);
 
     // Cancela qualquer consulta anterior que ainda esteja em andamento
     if (state.currentAbortController) {
@@ -3015,12 +3198,10 @@
       state.currentAbortController = null;
     }
 
-    stopSpeaking(fromVoice);
-    setAssistantState('thinking');
-    setResponseCardVisible(true);
-    el.userTranscript.classList.remove('hidden');
-    el.userTranscript.textContent = `“${question}”`;
-    el.assistantReply.textContent = 'Pensando...';
+    stopSpeaking(state.conversationActive);
+    setAssistantState('thinking', 'Consultando Gemini...');
+    appendUiMessage('user', displayQuestion);
+    const pendingMsg = appendUiMessage('assistant', 'Pensando...');
 
     const now = new Date();
     const formattedNow = new Intl.DateTimeFormat('pt-BR', {
@@ -3095,7 +3276,6 @@
         modelUsed = data._modelUsed || selectedModel;
         rawReply = extractGeminiReply(data);
       } else {
-        // Chamada direta com timeout + fallback automático entre modelos
         const modelsToTry = [
           selectedModel,
           ...GEMINI_FALLBACK_MODELS.filter((m) => m !== selectedModel),
@@ -3136,7 +3316,6 @@
           try {
             let { response, json } = await callDirect(candidateModel, true);
 
-            // Se o modelo rejeitar thinkingConfig com HTTP 400, tenta novamente sem ele
             if (
               !response.ok &&
               response.status === 400 &&
@@ -3235,27 +3414,29 @@
         state.chatHistory = state.chatHistory.slice(-10);
       }
 
-      el.assistantReply.textContent = cleanReply;
+      updateUiMessage(pendingMsg, cleanReply, false);
+      // Lê TODA resposta em voz alta automaticamente (voz, texto ou botão Resumo)
       speakText(cleanReply);
     } catch (err) {
       if (controller._superseded) return;
       if (controller._userCancelled) {
+        updateUiMessage(pendingMsg, 'Consulta cancelada.', false);
         if (state.assistantState === 'thinking') {
-          setAssistantState('idle');
+          setAssistantState('idle', 'Pronto para ouvir');
         }
         return;
       }
       console.error('Erro Gemini API:', err);
       playChime('error');
       const friendlyErr = `Não consegui consultar o Gemini: ${err.message}`;
-      el.assistantReply.textContent = friendlyErr;
+      updateUiMessage(pendingMsg, friendlyErr, true);
       showToast(friendlyErr, 'error', 5500);
-      setAssistantState('idle');
+      setAssistantState('idle', 'Erro ao consultar o Gemini.', true);
     } finally {
       if (state.currentAbortController === controller) {
         state.currentAbortController = null;
         if (state.assistantState === 'thinking') {
-          setAssistantState('idle');
+          setAssistantState('idle', 'Pronto para ouvir');
         }
       }
     }
@@ -3340,7 +3521,7 @@
 
     updateConfigBadge();
     updateClock();
-    if (state.todayEvents.length > 0) {
+    if (state.weekEvents.length > 0 || state.todayEvents.length > 0) {
       renderEventsList();
     }
 
@@ -3468,7 +3649,7 @@
       if (e.target === el.weatherExpandedModal) closeWeatherExpandedModal();
     });
 
-    // Agenda (alternador Dia/Semana + widget clicável para abrir semana em tela grande)
+    // Agenda (alternador Hoje/Semana + widget clicável para abrir semana em tela grande)
     el.connectCalendarBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       connectGoogleCalendar(false);
@@ -3546,51 +3727,57 @@
       }
     });
 
-    // Assistente de Voz, Modo Conversa Fluida, Comandos Rápidos e Texto
-    el.micBtn.addEventListener('click', () => startVoiceRecognition(false));
+    // Assistente de Voz: Resumo, Microfone, Chave Conversa Contínua, Parar Fala e Texto
+    el.micBtn?.addEventListener('click', () => startVoiceRecognition(false));
 
-    el.fluidModeBtn?.addEventListener('click', () => {
-      const next = !state.prefs.continuousVoice;
-      savePrefs({ ...state.prefs, continuousVoice: next });
-      updateFluidModeUI();
-      if (!next) {
+    el.summaryBtn?.addEventListener('click', () => {
+      triggerMorningBriefing();
+    });
+
+    el.continuousModeBtn?.addEventListener('click', () => {
+      unlockAudioOnFirstGesture({ primeSpeech: true });
+      state.continuousMode = !state.continuousMode;
+      updateContinuousModeUI();
+      if (!state.continuousMode) {
         state.conversationActive = false;
         cancelAutoListenTimer();
+        setAssistantState(state.assistantState, 'Conversa contínua desativada.');
+      } else {
+        setAssistantState(state.assistantState, 'Conversa contínua ativada.');
       }
       showToast(
-        next ? 'Conversa contínua ativada (microfone reabre após resposta).' : 'Conversa contínua desativada.',
+        state.continuousMode
+          ? 'Conversa contínua ativada (microfone reabre automaticamente após a resposta).'
+          : 'Conversa contínua desativada (um turno por vez).',
         'info',
-        2600
+        2800
       );
     });
 
-    el.quickPrompts?.addEventListener('click', (e) => {
-      const btn = e.target.closest('.quick-chip');
-      if (!btn) return;
-      unlockAudioOnFirstGesture();
-      const prompt = btn.dataset.prompt;
-      if (prompt) askGemini(prompt, { fromVoice: false });
+    el.stopVoiceBtn?.addEventListener('click', () => {
+      stopSpeaking(false, 'Fala interrompida.');
     });
 
-    el.replayVoiceBtn.addEventListener('click', () => {
-      unlockAudioOnFirstGesture();
+    el.replayVoiceBtn?.addEventListener('click', () => {
+      unlockAudioOnFirstGesture({ primeSpeech: true });
       if (state.lastReply) {
         speakText(state.lastReply);
+      } else {
+        showToast('Nenhuma resposta anterior para ouvir.', 'info', 2000);
       }
     });
 
-    el.clearResponseBtn.addEventListener('click', () => {
-      stopSpeaking(false);
+    el.clearResponseBtn?.addEventListener('click', () => {
+      stopSpeaking(false, 'Pronto para ouvir');
       state.lastReply = '';
       state.chatHistory = [];
-      el.userTranscript.textContent = '';
-      el.assistantReply.textContent = '';
-      setResponseCardVisible(false);
+      state.uiMessages = [];
+      renderChatMessages();
     });
 
-    el.textForm.addEventListener('submit', (e) => {
+    el.textForm?.addEventListener('submit', (e) => {
       e.preventDefault();
-      unlockAudioOnFirstGesture();
+      unlockAudioOnFirstGesture({ primeSpeech: true });
       const q = el.textInput.value.trim();
       if (!q) return;
       el.textInput.value = '';
@@ -3612,8 +3799,12 @@
     setupFullscreenButton();
     bindEvents();
     startClock();
-    updateFluidModeUI();
-    setWidgetAgendaRange('day');
+    // Conversa contínua começa SEMPRE desativada por padrão
+    state.continuousMode = false;
+    updateContinuousModeUI();
+    setWidgetAgendaRange('week');
+    renderChatMessages();
+    setAssistantState('idle', 'Pronto para ouvir');
     updateConfigBadge();
     updateOnlineStatus();
     registerServiceWorker();
