@@ -21,9 +21,8 @@ const FALLBACK_MODELS = [
   'gemini-flash-latest',
 ];
 const TTS_FALLBACK_MODELS = [
-  'gemini-3.8-flash-lite-tts',
-  'gemini-3.8-flash-tts',
   'gemini-2.5-flash-preview-tts',
+  'gemini-2.5-pro-preview-tts',
 ];
 const ALLOWED_VOICES = new Set([
   'Aoede',
@@ -125,11 +124,12 @@ async function handleTtsRequest(body, apiKey, res) {
     return res.status(400).json({ error: { message: 'Texto ausente para síntese de voz.' } });
   }
   const voiceName = ALLOWED_VOICES.has(body.voiceName) ? body.voiceName : 'Aoede';
+  const styledPrompt = `Fale em português do Brasil, de forma natural, calorosa e com ritmo ágil: ${text}`;
 
   let lastResult = null;
   for (const ttsModel of TTS_FALLBACK_MODELS) {
-    const buildPayload = (usePrebuilt) => ({
-      contents: [{ role: 'user', parts: [{ text }] }],
+    const buildPayload = (usePrebuilt, promptText = styledPrompt) => ({
+      contents: [{ role: 'user', parts: [{ text: promptText }] }],
       generationConfig: {
         responseModalities: ['AUDIO'],
         speechConfig: {
@@ -140,13 +140,17 @@ async function handleTtsRequest(body, apiKey, res) {
       },
     });
 
-    let result = await callGeminiEndpoint(ttsModel, apiKey, buildPayload(true));
+    let result = await callGeminiEndpoint(ttsModel, apiKey, buildPayload(true, styledPrompt));
     if (
       !result.ok &&
       result.status === 400 &&
       /prebuiltVoiceConfig|voiceConfig/i.test(result.data?.error?.message || '')
     ) {
-      result = await callGeminiEndpoint(ttsModel, apiKey, buildPayload(false));
+      result = await callGeminiEndpoint(ttsModel, apiKey, buildPayload(false, styledPrompt));
+    }
+
+    if (result.ok && !hasAudioReply(result.data)) {
+      result = await callGeminiEndpoint(ttsModel, apiKey, buildPayload(true, text));
     }
 
     lastResult = result;
