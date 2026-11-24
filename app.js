@@ -17,11 +17,22 @@
     SESSION_TOKEN: 'smartdock_gcal_token_session',
   };
 
-  const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
-  const GEMINI_FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest'];
-  const GEMINI_TTS_MODELS = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts', 'gemini-2.5-flash-preview-tts'];
-  const GEMINI_REQUEST_TIMEOUT_MS = 16000;
-  const GEMINI_TTS_TIMEOUT_MS = 8000;
+  const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
+  const GEMINI_FALLBACK_MODELS = [
+    'gemini-2.5-flash-lite',
+    'gemini-3.5-flash-lite',
+    'gemini-flash-lite-latest',
+    'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-3.8-flash',
+    'gemini-flash-latest',
+  ];
+  const GEMINI_TTS_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+  const GEMINI_REQUEST_TIMEOUT_MS = 12000;
+  const GEMINI_TTS_TIMEOUT_MS = 7000;
+  const MODEL_COOLDOWN_MS = 60 * 1000; // 60s de pausa para modelo com 503/429
+  const TTS_COOLDOWN_MS = 120 * 1000;  // 2min de pausa para TTS com 503/429
   const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
   const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
   const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
@@ -100,6 +111,13 @@
     activeAudioUrl: null,
     lastTtsCache: null,
     speechQueueId: 0,
+    lastWorkingModel: '',
+    lastWorkingTtsModel: '',
+    unavailableModels: new Set(),
+    unavailableTtsModels: new Set(),
+    modelCooldowns: new Map(),
+    ttsCooldowns: new Map(),
+    discoveredModels: null,
 
     // Preferências
     prefs: loadPrefs(),
@@ -2438,7 +2456,6 @@
     state.activeUtterance = null;
     setAssistantState('idle', '');
 
-    // Conversa contínua: SÓ reabre automaticamente se a chave "Conversa Contínua" estiver ATIVADA
     if (state.continuousMode && state.conversationActive && !isAnyModalOpen()) {
       cancelAutoListenTimer();
       state.autoListenTimer = setTimeout(() => {
@@ -2466,7 +2483,6 @@
       }, 320);
     } else {
       state.conversationActive = false;
-      // Quando termina o turno único, mantém o texto breve para leitura e volta ao layout normal
       scheduleAutoResetConversation(6000);
     }
   }
@@ -2539,7 +2555,20 @@
       return { response, data };
     };
 
-    for (const ttsModel of GEMINI_TTS_MODELS) {
+    const nowTs = Date.now();
+    const ttsCandidates = [
+      ...(state.lastWorkingTtsModel ? [state.lastWorkingTtsModel] : []),
+      ...GEMINI_TTS_MODELS.filter((m) => m !== state.lastWorkingTtsModel),
+    ].filter((m) => {
+      if (state.unavailableTtsModels.has(m)) return false;
+      const until = state.ttsCooldowns.get(m) || 0;
+      return nowTs >= until;
+    });
+
+    if (!ttsCandidates.length) return null;
+
+    // Tenta no máximo 2 modelos TTS saudáveis e para imediatamente em 429/503 para não consumir cota da IA
+    for (const ttsModel of ttsCandidates.slice(0, 2)) {
       try {
         let { response, data } = await callTtsModel(ttsModel, true);
         if (
@@ -2552,13 +2581,21 @@
         if (response.ok) {
           const audio = extractInlineAudio(data);
           if (audio) {
+            state.lastWorkingTtsModel = ttsModel;
             state.lastTtsCache = { text: cleanText, voiceName, audio };
             return audio;
           }
+        } else if (response.status === 404 || response.status === 403 || response.status === 400) {
+          state.unavailableTtsModels.add(ttsModel);
+        } else if ([429, 500, 502, 503, 504].includes(response.status)) {
+          state.ttsCooldowns.set(ttsModel, Date.now() + TTS_COOLDOWN_MS);
+          break;
         }
       } catch (err) {
         if (signal?.aborted) throw err;
         console.warn(`Falha TTS no modelo ${ttsModel}:`, err?.message || err);
+        state.ttsCooldowns.set(ttsModel, Date.now() + TTS_COOLDOWN_MS);
+        break;
       }
     }
     return null;
@@ -2918,7 +2955,6 @@
           idleStatus !== undefined ? idleStatus : '',
           isError
         );
-        // Quando corta o microfone sem fala, limpa os textos e volta ao layout normal
         scheduleAutoResetConversation(isError ? 3500 : 800);
       }
     };
@@ -3114,21 +3150,95 @@
       .trim();
   }
 
-  function isRetryableGeminiError(status, message, isTimeout = false) {
-    if (isTimeout) return true;
-    if ([404, 429, 500, 502, 503, 504].includes(status)) return true;
+  function isModelNotFoundError(status, message) {
+    if (status === 404) return true;
     const lower = String(message || '').toLowerCase();
     return (
-      lower.includes('no longer available') ||
       lower.includes('not found') ||
-      lower.includes('deprecated') ||
-      lower.includes('not supported') ||
-      lower.includes('overloaded') ||
+      lower.includes('no longer available') ||
+      lower.includes('is not supported for generatecontent') ||
+      lower.includes('deprecated')
+    );
+  }
+
+  function isOverloadedOrQuotaError(status, message, isTimeout = false) {
+    if (isTimeout) return true;
+    if ([429, 500, 502, 503, 504].includes(status)) return true;
+    const lower = String(message || '').toLowerCase();
+    return (
       lower.includes('high demand') ||
+      lower.includes('overloaded') ||
       lower.includes('unavailable') ||
       lower.includes('rate limit') ||
-      lower.includes('quota')
+      lower.includes('quota') ||
+      lower.includes('resource exhausted') ||
+      lower.includes('try again')
     );
+  }
+
+  function isRetryableGeminiError(status, message, isTimeout = false) {
+    return isModelNotFoundError(status, message) || isOverloadedOrQuotaError(status, message, isTimeout);
+  }
+
+  async function discoverAvailableGeminiModels(apiKey, parentSignal) {
+    if (Array.isArray(state.discoveredModels)) return state.discoveredModels;
+    try {
+      const res = await fetchWithTimeout(
+        `${GEMINI_API_BASE}?key=${encodeURIComponent(apiKey)}`,
+        { method: 'GET' },
+        7000,
+        parentSignal
+      );
+      if (!res.ok) return [];
+      const json = await res.json().catch(() => ({}));
+      const rawModels = Array.isArray(json.models) ? json.models : [];
+      const names = rawModels
+        .filter((m) => {
+          const methods = m?.supportedGenerationMethods || [];
+          const id = String(m?.name || '').replace(/^models\//, '');
+          if (!methods.includes('generateContent')) return false;
+          if (!/^gemini/i.test(id)) return false;
+          if (/tts|image|embedding|vision|aqa|robotics|computer-use|deep-research|audio|native-audio/i.test(id)) {
+            return false;
+          }
+          return true;
+        })
+        .map((m) => String(m.name).replace(/^models\//, ''));
+
+      names.sort((a, b) => {
+        const score = (id) => {
+          if (/flash-lite/i.test(id) && !/preview|exp/i.test(id)) return 1;
+          if (/flash-lite/i.test(id)) return 2;
+          if (/flash/i.test(id) && !/preview|exp|pro/i.test(id)) return 3;
+          if (/flash/i.test(id)) return 4;
+          return 5;
+        };
+        return score(a) - score(b);
+      });
+
+      state.discoveredModels = names;
+      return names;
+    } catch {
+      return [];
+    }
+  }
+
+  function delayMs(ms, signal) {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+      const t = setTimeout(() => {
+        if (signal) signal.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(t);
+        reject(new DOMException('Aborted', 'AbortError'));
+      };
+      if (signal) signal.addEventListener('abort', onAbort, { once: true });
+    });
   }
 
   async function fetchWithTimeout(url, options, timeoutMs, parentSignal) {
@@ -3258,7 +3368,19 @@
       'Use os dados reais de agenda e clima sempre que forem relevantes para a pergunta.',
     ].join('\n\n');
 
-    const recentHistory = state.chatHistory.slice(-6);
+    // Histórico compacto (últimos 2 turnos) com alternância garantida user -> model
+    const rawHistory = state.chatHistory.slice(-4);
+    const recentHistory = [];
+    for (const item of rawHistory) {
+      if (!item || !item.role || !item.parts?.[0]?.text) continue;
+      if (recentHistory.length === 0 && item.role !== 'user') continue;
+      if (recentHistory.length > 0 && recentHistory[recentHistory.length - 1].role === item.role) continue;
+      recentHistory.push(item);
+    }
+    if (recentHistory.length > 0 && recentHistory[recentHistory.length - 1].role === 'user') {
+      recentHistory.pop();
+    }
+
     const contents = [
       ...recentHistory,
       {
@@ -3305,12 +3427,22 @@
         modelUsed = data._modelUsed || selectedModel;
         rawReply = extractGeminiReply(data);
       } else {
-        const modelsToTry = [
+        const nowTs = Date.now();
+        const orderedRaw = [
+          ...(state.lastWorkingModel ? [state.lastWorkingModel] : []),
           selectedModel,
-          ...GEMINI_FALLBACK_MODELS.filter((m) => m !== selectedModel),
+          ...GEMINI_FALLBACK_MODELS,
         ];
+        const uniqueOrdered = [...new Set(orderedRaw)].filter(
+          (m) => m && !state.unavailableModels.has(m)
+        );
+        const healthyModels = uniqueOrdered.filter((m) => (state.modelCooldowns.get(m) || 0) <= nowTs);
+        const coolingModels = uniqueOrdered.filter((m) => (state.modelCooldowns.get(m) || 0) > nowTs);
+        const modelsToTry = [...healthyModels, ...coolingModels];
+
         let succeeded = false;
         let lastError = 'Erro ao consultar o Gemini.';
+        let sawOverload = false;
 
         const callDirect = async (candidateModel, includeThinking) => {
           const thinkingConfig = includeThinking ? getThinkingConfigForModel(candidateModel) : null;
@@ -3336,50 +3468,94 @@
           return { response, json };
         };
 
-        for (let idx = 0; idx < modelsToTry.length; idx++) {
-          const candidateModel = modelsToTry[idx];
-          if (idx > 0 && el.assistantStatus) {
-            el.assistantStatus.textContent = `Tentando modelo alternativo (${candidateModel})...`;
+        const tryModelList = async (list, triedSet) => {
+          for (const candidateModel of list) {
+            if (triedSet.has(candidateModel) || state.unavailableModels.has(candidateModel)) continue;
+            triedSet.add(candidateModel);
+
+            if (triedSet.size > 1 && el.assistantStatus) {
+              el.assistantStatus.textContent = 'Modelo ocupado, tentando alternativa...';
+              el.assistantStatusBar?.classList.add('has-status');
+            }
+
+            try {
+              let { response, json } = await callDirect(candidateModel, true);
+
+              if (
+                !response.ok &&
+                response.status === 400 &&
+                /thinking/i.test(json?.error?.message || '')
+              ) {
+                ({ response, json } = await callDirect(candidateModel, false));
+              }
+
+              data = json;
+              if (response.ok) {
+                const extracted = extractGeminiReply(data);
+                if (extracted) {
+                  rawReply = extracted;
+                  modelUsed = candidateModel;
+                  state.lastWorkingModel = candidateModel;
+                  state.modelCooldowns.delete(candidateModel);
+                  succeeded = true;
+                  return true;
+                }
+                lastError = 'O Gemini retornou uma resposta vazia.';
+                continue;
+              }
+
+              const apiMsg = data?.error?.message || `Erro HTTP ${response.status}`;
+              lastError = apiMsg;
+
+              if (isModelNotFoundError(response.status, apiMsg)) {
+                state.unavailableModels.add(candidateModel);
+                continue;
+              }
+
+              if (isOverloadedOrQuotaError(response.status, apiMsg, false)) {
+                sawOverload = true;
+                state.modelCooldowns.set(candidateModel, Date.now() + MODEL_COOLDOWN_MS);
+                continue;
+              }
+
+              return false;
+            } catch (attemptErr) {
+              if (controller._userCancelled || controller._superseded) {
+                throw attemptErr;
+              }
+              lastError = attemptErr.message || 'Falha de rede ao consultar o Gemini.';
+              if (isOverloadedOrQuotaError(0, lastError, Boolean(attemptErr.isTimeout))) {
+                sawOverload = true;
+                state.modelCooldowns.set(candidateModel, Date.now() + MODEL_COOLDOWN_MS);
+                continue;
+              }
+              return false;
+            }
+          }
+          return false;
+        };
+
+        const triedModels = new Set();
+        await tryModelList(modelsToTry, triedModels);
+
+        if (!succeeded && (sawOverload || triedModels.size > 0)) {
+          const discovered = await discoverAvailableGeminiModels(apiKey, controller.signal);
+          const freshDiscovered = discovered.filter((m) => !triedModels.has(m)).slice(0, 4);
+          if (freshDiscovered.length > 0) {
+            await tryModelList(freshDiscovered, triedModels);
+          }
+        }
+
+        if (!succeeded && sawOverload) {
+          if (el.assistantStatus) {
+            el.assistantStatus.textContent = 'Alta demanda no Gemini, tentando novamente...';
             el.assistantStatusBar?.classList.add('has-status');
           }
-
-          try {
-            let { response, json } = await callDirect(candidateModel, true);
-
-            if (
-              !response.ok &&
-              response.status === 400 &&
-              /thinking/i.test(json?.error?.message || '')
-            ) {
-              ({ response, json } = await callDirect(candidateModel, false));
-            }
-
-            data = json;
-            if (response.ok) {
-              const extracted = extractGeminiReply(data);
-              if (extracted) {
-                rawReply = extracted;
-                modelUsed = candidateModel;
-                succeeded = true;
-                break;
-              }
-              lastError = 'O Gemini retornou uma resposta vazia.';
-              continue;
-            }
-
-            const apiMsg = data?.error?.message || `Erro HTTP ${response.status}`;
-            lastError = apiMsg;
-            if (!isRetryableGeminiError(response.status, apiMsg, false)) {
-              break;
-            }
-          } catch (attemptErr) {
-            if (controller._userCancelled || controller._superseded) {
-              throw attemptErr;
-            }
-            lastError = attemptErr.message || 'Falha de rede ao consultar o Gemini.';
-            if (!isRetryableGeminiError(0, lastError, Boolean(attemptErr.isTimeout))) {
-              break;
-            }
+          await delayMs(1200, controller.signal);
+          const retryModel = state.lastWorkingModel || modelsToTry[0];
+          if (retryModel && !state.unavailableModels.has(retryModel)) {
+            const retrySet = new Set();
+            await tryModelList([retryModel], retrySet);
           }
         }
 
@@ -3487,7 +3663,9 @@
       ? 'Conectado automaticamente via Vercel (opcional sobrescrever)'
       : '1234567890-abcdefg.apps.googleusercontent.com';
     if (el.geminiModelSelect) {
-      el.geminiModelSelect.value = state.prefs.geminiModel || DEFAULT_GEMINI_MODEL;
+      const targetModel = state.prefs.geminiModel || DEFAULT_GEMINI_MODEL;
+      const hasOption = Array.from(el.geminiModelSelect.options).some((o) => o.value === targetModel);
+      el.geminiModelSelect.value = hasOption ? targetModel : DEFAULT_GEMINI_MODEL;
     }
     if (el.voiceEngineSelect) {
       el.voiceEngineSelect.value = state.prefs.voiceEngine || 'gemini';
@@ -3549,6 +3727,13 @@
       geminiModel: el.geminiModelSelect?.value || DEFAULT_GEMINI_MODEL,
     });
     state.lastTtsCache = null;
+    state.lastWorkingModel = '';
+    state.lastWorkingTtsModel = '';
+    state.unavailableModels.clear();
+    state.unavailableTtsModels.clear();
+    state.modelCooldowns.clear();
+    state.ttsCooldowns.clear();
+    state.discoveredModels = null;
 
     updateConfigBadge();
     updateClock();
