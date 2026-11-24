@@ -1,135 +1,103 @@
 /* ==========================================================================
-   Smart Dock — Novo Layout Lado a Lado (Topo: Relógio+Data | Clima,
-   Base: Agenda | Assistente) + Controles de Voz + Modais Expandidos
+   Smart Dock — Layout 2 Colunas:
+   Esquerda sem margem/borda em volta (Data, Hora, Info + Assistente abaixo)
+   Direita com cards/borda em volta (Clima + Agenda)
    ========================================================================== */
 
-/* ---- Grade Principal em 2 Faixas (Sem rolagem desnecessária) ---- */
+/* ---- Grade Principal em 2 Colunas ---- */
 .dock-grid {
   flex: 1;
   min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(330px, 420px);
+  gap: 22px;
+  align-items: stretch;
+}
+
+/* ---- COLUNA ESQUERDA: Sem borda/margem em volta (Relógio+Info em cima, Assistente embaixo) ---- */
+.hero-left-column {
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-
-/* ---- TOPO: Relógio & Data à Esquerda + Clima bem ao lado Direito ---- */
-.top-hero-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.95fr);
-  gap: 16px;
-  align-items: stretch;
-  flex-shrink: 0;
-}
-
-.clock-hero-card {
-  display: flex;
   align-items: center;
-  justify-content: flex-start;
-  padding: 18px 26px;
-  background: linear-gradient(155deg, rgba(24, 27, 36, 0.84) 0%, rgba(14, 16, 22, 0.9) 100%);
-  border: 1px solid var(--border-glass);
+  justify-content: space-between;
+  gap: 14px;
+  padding: 2px 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
-.clock-hero-card .clock-block {
-  align-items: flex-start;
-  text-align: left;
+/* Relógio, Data e Informações (limpo, direto no fundo, legível à distância) */
+.hero-left-column .clock-block {
   width: 100%;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
 }
 
-/* Fonte grande e legível à distância para Data e Relógio */
-.clock-hero-card .date-pill {
-  padding: 6px 15px;
-  font-size: clamp(0.95rem, 1.35vw, 1.16rem);
+.hero-left-column .date-pill {
+  padding: 6px 16px;
+  font-size: clamp(0.95rem, 1.3vw, 1.14rem);
   font-weight: 600;
   gap: 9px;
-  background: rgba(255, 255, 255, 0.075);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
-.clock-hero-card .date-display {
-  color: rgba(241, 245, 249, 0.9);
+.hero-left-column .date-display {
+  color: rgba(241, 245, 249, 0.88);
   font-weight: 500;
 }
 
-.clock-hero-card .clock-display {
-  justify-content: flex-start;
-  margin-top: 2px;
+.hero-left-column .clock-display {
+  margin-top: 4px;
   line-height: 0.92;
 }
 
-.clock-hero-card .clock-time {
-  font-size: clamp(4.6rem, 7.8vw, 7.2rem);
+.hero-left-column .clock-time {
+  font-size: clamp(5rem, 8.8vw, 7.8rem);
   font-weight: 600;
   letter-spacing: -0.045em;
 }
 
-.clock-hero-card .clock-seconds {
-  font-size: clamp(1.5rem, 2.5vw, 2.25rem);
+.hero-left-column .clock-seconds {
+  font-size: clamp(1.5rem, 2.5vw, 2.3rem);
 }
 
-.clock-hero-card .clock-ampm {
-  font-size: clamp(0.92rem, 1.3vw, 1.15rem);
+.hero-left-column .clock-ampm {
+  font-size: clamp(0.9rem, 1.3vw, 1.15rem);
 }
 
-.clock-hero-card .next-event-chip {
+.hero-left-column .next-event-chip {
   margin-top: 4px;
-  font-size: 0.86rem;
-  padding: 6px 13px;
+  font-size: 0.85rem;
+  padding: 6px 14px;
 }
 
-/* Widget de Clima no topo direito, alinhado à altura do Relógio */
-.top-hero-row .weather-widget {
-  justify-content: space-between;
-  padding: 14px 18px;
-  gap: 8px;
-}
-
-.top-hero-row .weather-temp {
-  font-size: clamp(2.6rem, 4.1vw, 3.4rem);
-}
-
-.top-hero-row .weather-condition {
-  font-size: 1rem;
-}
-
-.top-hero-row .weather-highlow {
-  font-size: 0.82rem;
-}
-
-.top-hero-row .weather-hero-icon {
-  width: 56px;
-  height: 56px;
-}
-
-/* ---- ÁREA INFERIOR: Duas Colunas Lado a Lado com Mesma Altura ---- */
-.bottom-columns-grid {
+/* Assistente logo abaixo — também SEM card/borda/margem em volta */
+.assistant-panel.frameless-panel {
+  width: 100%;
+  max-width: 640px;
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
-  align-items: stretch;
-}
-
-/* Coluna Esquerda: Agenda estilo calendário */
-.bottom-columns-grid .agenda-card {
-  height: 100%;
-  min-height: 0;
-  max-height: none;
-  padding: 16px 18px;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Coluna Direita: Painel do Assistente, Fala e Mensagens */
-.assistant-panel {
-  height: 100%;
-  min-height: 0;
-  padding: 16px 18px 14px;
+  padding: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .assistant-panel-header {
@@ -138,8 +106,8 @@
   justify-content: space-between;
   gap: 10px;
   flex-shrink: 0;
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0 2px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 
 .model-chip {
@@ -194,7 +162,7 @@ body[data-state="speaking"] .stop-voice-btn {
   display: flex;
   flex-direction: column;
   gap: 9px;
-  padding: 4px 4px 4px 0;
+  padding: 4px 2px;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
@@ -202,15 +170,15 @@ body[data-state="speaking"] .stop-voice-btn {
 .chat-empty-state {
   margin: auto;
   text-align: center;
-  padding: 18px 16px;
-  max-width: 340px;
+  padding: 12px 14px;
+  max-width: 360px;
 }
 
 .chat-empty-title {
-  margin: 0 0 6px;
-  font-size: 0.98rem;
+  margin: 0 0 5px;
+  font-size: 0.96rem;
   font-weight: 600;
-  color: var(--label-primary);
+  color: var(--label-secondary);
 }
 
 .chat-empty-sub {
@@ -225,8 +193,8 @@ body[data-state="speaking"] .stop-voice-btn {
 }
 
 .chat-bubble {
-  max-width: 92%;
-  padding: 10px 13px;
+  max-width: 90%;
+  padding: 10px 14px;
   border-radius: 16px;
   display: flex;
   flex-direction: column;
@@ -244,7 +212,7 @@ body[data-state="speaking"] .stop-voice-btn {
 
 .chat-bubble.assistant {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.055);
+  background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-bottom-left-radius: 5px;
 }
@@ -272,7 +240,7 @@ body[data-state="speaking"] .stop-voice-btn {
 
 .chat-bubble-text {
   margin: 0;
-  font-size: 0.9rem;
+  font-size: 0.92rem;
   line-height: 1.48;
   color: var(--label-primary);
   white-space: pre-wrap;
@@ -284,7 +252,7 @@ body[data-state="speaking"] .stop-voice-btn {
   align-items: center;
   justify-content: center;
   gap: 7px;
-  min-height: 20px;
+  min-height: 18px;
   flex-shrink: 0;
 }
 
@@ -314,7 +282,7 @@ body[data-state="speaking"] .assistant-status-dot {
 
 .assistant-status {
   margin: 0;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 500;
   color: var(--label-secondary);
   min-height: 1.2em;
@@ -418,24 +386,24 @@ body[data-state="speaking"] .assistant-status-dot {
 /* Microfone equilibrado no centro dos controles */
 .voice-controls-row .mic-stage {
   justify-self: center;
-  width: 82px;
-  height: 82px;
+  width: 88px;
+  height: 88px;
   flex-shrink: 0;
 }
 
 .voice-controls-row .siri-halo {
   inset: 5px;
-  filter: blur(14px);
+  filter: blur(15px);
 }
 
 .voice-controls-row .mic-btn {
-  width: 64px;
-  height: 64px;
+  width: 68px;
+  height: 68px;
 }
 
 .voice-controls-row .mic-icon {
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
 }
 
 .voice-controls-row .voice-bars {
@@ -450,6 +418,28 @@ body[data-state="speaking"] .assistant-status-dot {
 
 .assistant-panel .text-fallback {
   flex-shrink: 0;
+}
+
+/* ---- COLUNA DIREITA: Clima e Agenda COM cards e margem/borda em volta ---- */
+.widgets-right-column {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+}
+
+.widgets-right-column .weather-widget {
+  flex-shrink: 0;
+}
+
+.widgets-right-column .agenda-card {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---- Agenda Estilo Calendário Estruturado ---- */
@@ -551,9 +541,9 @@ body[data-state="speaking"] .assistant-status-dot {
     height: 100dvh;
     max-height: 100dvh;
     overflow: hidden;
-    gap: 12px;
-    padding-top: calc(12px + var(--safe-top));
-    padding-bottom: calc(14px + var(--safe-bottom));
+    gap: 14px;
+    padding-top: calc(14px + var(--safe-top));
+    padding-bottom: calc(16px + var(--safe-bottom));
   }
 }
 
@@ -569,45 +559,37 @@ body[data-state="speaking"] .assistant-status-dot {
     height: auto;
     min-height: 100dvh;
     overflow: visible;
-    padding-bottom: calc(24px + var(--safe-bottom));
-    gap: 12px;
+    padding-bottom: calc(26px + var(--safe-bottom));
+    gap: 14px;
   }
 
-  .top-hero-row {
+  .dock-grid {
     grid-template-columns: 1fr;
+    gap: 16px;
+    align-items: start;
+  }
+
+  .hero-left-column {
     gap: 12px;
   }
 
-  .clock-hero-card {
-    padding: 16px 18px;
+  .hero-left-column .clock-time {
+    font-size: clamp(4.4rem, 20vw, 6.2rem);
   }
 
-  .clock-hero-card .clock-block {
-    align-items: center;
-    text-align: center;
+  .assistant-panel.frameless-panel {
+    max-width: 100%;
+    min-height: 290px;
+    max-height: 52dvh;
   }
 
-  .clock-hero-card .clock-display {
-    justify-content: center;
-  }
-
-  .clock-hero-card .clock-time {
-    font-size: clamp(4.2rem, 19vw, 5.8rem);
-  }
-
-  .bottom-columns-grid {
-    grid-template-columns: 1fr;
+  .widgets-right-column {
+    height: auto;
     gap: 12px;
   }
 
-  .assistant-panel {
-    order: -1;
-    min-height: 360px;
-    max-height: 58dvh;
-  }
-
-  .bottom-columns-grid .agenda-card {
-    min-height: 260px;
+  .widgets-right-column .agenda-card {
+    min-height: 250px;
     max-height: 48dvh;
   }
 
@@ -640,90 +622,49 @@ body[data-state="speaking"] .assistant-status-dot {
     overflow: hidden;
     gap: 6px;
     padding-top: calc(6px + var(--safe-top));
-    padding-right: calc(10px + var(--safe-right));
+    padding-right: calc(12px + var(--safe-right));
     padding-bottom: calc(6px + var(--safe-bottom));
-    padding-left: calc(10px + var(--safe-left));
+    padding-left: calc(12px + var(--safe-left));
   }
 
   .dock-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
+    grid-template-columns: minmax(0, 1.2fr) minmax(260px, 330px);
+    gap: 12px;
   }
 
-  .top-hero-row {
-    grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.95fr);
-    gap: 8px;
+  .hero-left-column {
+    gap: 5px;
+    padding: 0;
   }
 
-  .clock-hero-card {
-    padding: 8px 14px;
-    border-radius: 18px;
-  }
-
-  .clock-hero-card .clock-block {
+  .hero-left-column .clock-block {
     gap: 2px;
   }
 
-  .clock-hero-card .date-pill {
-    padding: 2px 9px;
+  .hero-left-column .date-pill {
+    padding: 2px 10px;
     font-size: 0.72rem;
     gap: 5px;
   }
 
-  .clock-hero-card .clock-time {
-    font-size: clamp(2.5rem, 11.5vh, 3.6rem);
+  .hero-left-column .clock-time {
+    font-size: clamp(2.6rem, 13vh, 3.8rem);
   }
 
-  .clock-hero-card .clock-seconds {
-    font-size: clamp(0.9rem, 3.8vh, 1.25rem);
+  .hero-left-column .clock-seconds {
+    font-size: clamp(0.9rem, 4vh, 1.3rem);
   }
 
-  .clock-hero-card .next-event-chip {
+  .hero-left-column .next-event-chip {
     display: none;
   }
 
-  .top-hero-row .weather-widget {
-    padding: 7px 12px;
-    gap: 4px;
-    border-radius: 18px;
-  }
-
-  .top-hero-row .weather-temp {
-    font-size: 1.85rem;
-  }
-
-  .top-hero-row .weather-condition {
-    font-size: 0.76rem;
-  }
-
-  .top-hero-row .weather-highlow {
-    font-size: 0.66rem;
-  }
-
-  .top-hero-row .weather-hero-icon {
-    width: 34px;
-    height: 34px;
-  }
-
-  .top-hero-row .weather-hourly-strip {
-    display: none;
-  }
-
-  .bottom-columns-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
-  }
-
-  .bottom-columns-grid .agenda-card,
-  .assistant-panel {
-    padding: 8px 11px;
-    border-radius: 18px;
+  .assistant-panel.frameless-panel {
     gap: 5px;
   }
 
   .assistant-panel-header {
-    padding-bottom: 5px;
+    padding-bottom: 4px;
   }
 
   .model-chip {
@@ -793,6 +734,10 @@ body[data-state="speaking"] .assistant-status-dot {
   .voice-controls-row .mic-icon {
     width: 18px;
     height: 18px;
+  }
+
+  .widgets-right-column {
+    gap: 7px;
   }
 
   .seg-btn {
