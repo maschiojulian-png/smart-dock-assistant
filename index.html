@@ -173,18 +173,13 @@
             </div>
           </div>
 
-          <!-- Histórico de Mensagens (Perguntas e Respostas) -->
-          <div class="chat-messages" id="chatMessages" aria-live="polite">
-            <div class="chat-empty-state" id="chatEmptyState">
-              <p class="chat-empty-title">Como posso ajudar hoje?</p>
-              <p class="chat-empty-sub">Toque no microfone, clique em <strong>Resumo</strong> ou digite sua pergunta abaixo.</p>
-            </div>
-          </div>
+          <!-- Histórico de Mensagens (exibido apenas durante conversa ativa) -->
+          <div class="chat-messages" id="chatMessages" aria-live="polite"></div>
 
-          <!-- Status da Voz / Erros em Tempo Real -->
-          <div class="assistant-status-bar">
+          <!-- Status da Voz / Erros em Tempo Real (oculto em repouso) -->
+          <div class="assistant-status-bar" id="assistantStatusBar">
             <span class="assistant-status-dot" aria-hidden="true"></span>
-            <p class="assistant-status" id="assistantStatus" role="status" aria-live="polite">Pronto para ouvir</p>
+            <p class="assistant-status" id="assistantStatus" role="status" aria-live="polite"></p>
           </div>
 
           <!-- Controles de Voz: [Resumo] (Microfone) [Conversa Contínua] -->

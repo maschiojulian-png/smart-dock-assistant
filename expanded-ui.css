@@ -1,7 +1,13 @@
 /* ==========================================================================
    Smart Dock — Layout 2 Colunas:
-   Esquerda sem margem/borda em volta (Data, Hora, Info + Assistente abaixo)
-   Direita com cards/borda em volta (Clima + Agenda)
+   Esquerda sem margem/borda:
+     - Repouso: metade superior com Data, Hora e Saudação GRANDES;
+                metade inferior com Microfone GRANDE, Resumo, Contínua e texto
+     - Conversa ativa (body.conversation-open):
+                relógio diminui e sobe para o topo, abrindo amplo espaço
+                para ler a conversa; ao cortar o microfone/encerrar, some o
+                texto e o layout volta ao normal suavemente.
+   Direita com cards/borda em volta (Clima + Agenda).
    ========================================================================== */
 
 /* ---- Grade Principal em 2 Colunas ---- */
@@ -14,29 +20,49 @@
   align-items: stretch;
 }
 
-/* ---- COLUNA ESQUERDA: Sem borda/margem em volta (Relógio+Info em cima, Assistente embaixo) ---- */
+/* ---- Transições suaves entre Repouso e Conversa Ativa ---- */
+.hero-left-column,
+.hero-left-column .clock-block,
+.hero-left-column .date-pill,
+.hero-left-column .clock-time,
+.hero-left-column .clock-seconds,
+.voice-controls-row .mic-stage,
+.voice-controls-row .mic-btn,
+.voice-side-btn {
+  transition:
+    font-size var(--transition-smooth),
+    width var(--transition-smooth),
+    height var(--transition-smooth),
+    padding var(--transition-smooth),
+    gap var(--transition-smooth),
+    transform var(--transition-smooth),
+    opacity var(--transition-fast);
+}
+
+/* ---- COLUNA ESQUERDA: Sem borda/margem em volta ---- */
 .hero-left-column {
   min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 2px 0;
+  justify-content: center;
+  gap: 12px;
+  padding: 0;
   background: transparent;
   border: none;
   box-shadow: none;
 }
 
-/* Relógio, Data e Informações (limpo, direto no fundo, legível à distância) */
+/* METADE SUPERIOR (Repouso): Hora, Data e Saudação GRANDES e legíveis à distância */
 .hero-left-column .clock-block {
+  flex: 1;
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   text-align: center;
-  gap: 6px;
-  flex-shrink: 0;
+  gap: 10px;
   background: transparent;
   border: none;
   box-shadow: none;
@@ -44,54 +70,56 @@
 }
 
 .hero-left-column .date-pill {
-  padding: 6px 16px;
-  font-size: clamp(0.95rem, 1.3vw, 1.14rem);
+  padding: 8px 20px;
+  font-size: clamp(1.12rem, 1.65vw, 1.48rem);
   font-weight: 600;
-  gap: 9px;
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.1);
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.065);
+  border-color: rgba(255, 255, 255, 0.11);
 }
 
 .hero-left-column .date-display {
-  color: rgba(241, 245, 249, 0.88);
+  color: rgba(241, 245, 249, 0.92);
   font-weight: 500;
 }
 
 .hero-left-column .clock-display {
-  margin-top: 4px;
-  line-height: 0.92;
+  margin-top: 2px;
+  line-height: 0.9;
 }
 
 .hero-left-column .clock-time {
-  font-size: clamp(5rem, 8.8vw, 7.8rem);
+  font-size: clamp(6.4rem, 11.5vw, 10.6rem);
   font-weight: 600;
   letter-spacing: -0.045em;
 }
 
 .hero-left-column .clock-seconds {
-  font-size: clamp(1.5rem, 2.5vw, 2.3rem);
+  font-size: clamp(1.95rem, 3.2vw, 2.95rem);
 }
 
 .hero-left-column .clock-ampm {
-  font-size: clamp(0.9rem, 1.3vw, 1.15rem);
+  font-size: clamp(1rem, 1.5vw, 1.3rem);
 }
 
 .hero-left-column .next-event-chip {
   margin-top: 4px;
-  font-size: 0.85rem;
-  padding: 6px 14px;
+  font-size: 0.88rem;
+  padding: 6px 15px;
 }
 
-/* Assistente logo abaixo — também SEM card/borda/margem em volta */
+/* METADE INFERIOR (Repouso): Assistente limpo, SEM linha divisória, SEM borda em volta */
 .assistant-panel.frameless-panel {
   width: 100%;
-  max-width: 640px;
+  max-width: 620px;
   flex: 1;
   min-height: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
   background: transparent;
   border: none;
   border-radius: 0;
@@ -100,16 +128,115 @@
   -webkit-backdrop-filter: none;
 }
 
+/* Cabeçalho, mensagens e status ficam OCULTOS em repouso (sem linha horizontal nem textos extras) */
 .assistant-panel-header {
-  display: flex;
+  display: none;
+  width: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   flex-shrink: 0;
-  padding: 0 2px 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 0 2px;
+  border-bottom: none;
 }
 
+.chat-messages {
+  display: none;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.assistant-status-bar {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 18px;
+  flex-shrink: 0;
+}
+
+.assistant-status-bar.has-status {
+  display: flex;
+}
+
+/* ---- MODO CONVERSA ATIVA: Relógio diminui e sobe, abrindo espaço para ler a conversa ---- */
+body.conversation-open .hero-left-column {
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+body.conversation-open .hero-left-column .clock-block {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  gap: 2px;
+  padding-top: 2px;
+}
+
+body.conversation-open .hero-left-column .date-pill {
+  padding: 3px 12px;
+  font-size: 0.78rem;
+  gap: 6px;
+}
+
+body.conversation-open .hero-left-column .clock-display {
+  margin-top: 2px;
+}
+
+body.conversation-open .hero-left-column .clock-time {
+  font-size: clamp(2.4rem, 4.3vw, 3.4rem);
+}
+
+body.conversation-open .hero-left-column .clock-seconds {
+  font-size: clamp(0.95rem, 1.5vw, 1.25rem);
+}
+
+body.conversation-open .hero-left-column .next-event-chip {
+  display: none;
+}
+
+body.conversation-open .assistant-panel.frameless-panel {
+  flex: 1;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+body.conversation-open .assistant-panel-header {
+  display: flex;
+}
+
+body.conversation-open .chat-messages {
+  display: flex;
+}
+
+body.conversation-open .voice-controls-row .mic-stage {
+  width: 74px;
+  height: 74px;
+}
+
+body.conversation-open .voice-controls-row .mic-btn {
+  width: 58px;
+  height: 58px;
+}
+
+body.conversation-open .voice-controls-row .mic-icon {
+  width: 23px;
+  height: 23px;
+}
+
+body.conversation-open .voice-side-btn {
+  height: 36px;
+  padding: 0 12px;
+  font-size: 0.78rem;
+}
+
+/* ---- Componentes Internos do Assistente ---- */
 .model-chip {
   font-size: 0.66rem;
   font-weight: 600;
@@ -123,7 +250,6 @@
   margin-left: 4px;
 }
 
-/* Botão rápido de silenciar / parar leitura em voz alta */
 .stop-voice-btn {
   display: inline-flex;
   align-items: center;
@@ -154,48 +280,10 @@ body[data-state="speaking"] .stop-voice-btn {
   animation: gentlePulse 1.6s ease-in-out infinite;
 }
 
-/* ---- Histórico de Mensagens (Perguntas & Respostas) ---- */
-.chat-messages {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  padding: 4px 2px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
-}
-
-.chat-empty-state {
-  margin: auto;
-  text-align: center;
-  padding: 12px 14px;
-  max-width: 360px;
-}
-
-.chat-empty-title {
-  margin: 0 0 5px;
-  font-size: 0.96rem;
-  font-weight: 600;
-  color: var(--label-secondary);
-}
-
-.chat-empty-sub {
-  margin: 0;
-  font-size: 0.82rem;
-  line-height: 1.5;
-  color: var(--label-tertiary);
-}
-
-.chat-empty-sub strong {
-  color: var(--label-secondary);
-}
-
 .chat-bubble {
-  max-width: 90%;
-  padding: 10px 14px;
-  border-radius: 16px;
+  max-width: 92%;
+  padding: 11px 15px;
+  border-radius: 17px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -212,8 +300,8 @@ body[data-state="speaking"] .stop-voice-btn {
 
 .chat-bubble.assistant {
   align-self: flex-start;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(255, 255, 255, 0.065);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-bottom-left-radius: 5px;
 }
 
@@ -240,20 +328,10 @@ body[data-state="speaking"] .stop-voice-btn {
 
 .chat-bubble-text {
   margin: 0;
-  font-size: 0.92rem;
-  line-height: 1.48;
+  font-size: 0.96rem;
+  line-height: 1.5;
   color: var(--label-primary);
   white-space: pre-wrap;
-}
-
-/* ---- Barra de Status da Voz & Erros ---- */
-.assistant-status-bar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 18px;
-  flex-shrink: 0;
 }
 
 .assistant-status-dot {
@@ -293,12 +371,13 @@ body[data-state="speaking"] .assistant-status-dot {
   color: #fca5a5;
 }
 
-/* ---- Linha de Controles de Fala: [Resumo] (Microfone) [Contínua] ---- */
+/* ---- Controles de Fala: [Resumo] (Microfone GRANDE) [Contínua] ---- */
 .voice-controls-row {
+  width: 100%;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  gap: 14px;
+  gap: 18px;
   flex-shrink: 0;
   padding: 2px 0;
 }
@@ -307,17 +386,16 @@ body[data-state="speaking"] .assistant-status-dot {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  height: 38px;
-  padding: 0 13px;
+  gap: 8px;
+  height: 44px;
+  padding: 0 16px;
   border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.065);
   border: 1px solid rgba(255, 255, 255, 0.11);
   color: var(--label-secondary);
-  font-size: 0.79rem;
+  font-size: 0.86rem;
   font-weight: 600;
   white-space: nowrap;
-  transition: all var(--transition-fast);
 }
 
 .voice-side-btn:hover {
@@ -343,13 +421,13 @@ body[data-state="speaking"] .assistant-status-dot {
 
 .continuous-toggle-btn {
   justify-self: start;
-  padding-right: 9px;
+  padding-right: 11px;
 }
 
 .mini-switch {
   position: relative;
-  width: 30px;
-  height: 17px;
+  width: 32px;
+  height: 18px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.16);
   transition: background var(--transition-fast);
@@ -360,8 +438,8 @@ body[data-state="speaking"] .assistant-status-dot {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #e2e8f0;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
@@ -379,44 +457,45 @@ body[data-state="speaking"] .assistant-status-dot {
 }
 
 .continuous-toggle-btn[aria-pressed="true"] .mini-switch-knob {
-  transform: translateX(13px);
+  transform: translateX(14px);
   background: #ffffff;
 }
 
-/* Microfone equilibrado no centro dos controles */
+/* Microfone MAIOR no estado normal */
 .voice-controls-row .mic-stage {
   justify-self: center;
-  width: 88px;
-  height: 88px;
+  width: 132px;
+  height: 132px;
   flex-shrink: 0;
 }
 
 .voice-controls-row .siri-halo {
-  inset: 5px;
-  filter: blur(15px);
+  inset: 7px;
+  filter: blur(18px);
 }
 
 .voice-controls-row .mic-btn {
-  width: 68px;
-  height: 68px;
+  width: 102px;
+  height: 102px;
 }
 
 .voice-controls-row .mic-icon {
-  width: 28px;
-  height: 28px;
+  width: 38px;
+  height: 38px;
 }
 
 .voice-controls-row .voice-bars {
-  height: 24px;
-  gap: 4px;
+  height: 28px;
+  gap: 5px;
 }
 
 .voice-controls-row .thinking-spinner {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
 }
 
 .assistant-panel .text-fallback {
+  width: 100%;
   flex-shrink: 0;
 }
 
@@ -442,7 +521,7 @@ body[data-state="speaking"] .assistant-status-dot {
   flex-direction: column;
 }
 
-/* Cabeçalho da Agenda limpo em 2 linhas quando compacto (sem quebrar o título) */
+/* Cabeçalho da Agenda limpo em 2 linhas quando compacto */
 .widgets-right-column .agenda-card .card-header {
   flex-wrap: wrap;
   row-gap: 8px;
@@ -458,12 +537,7 @@ body[data-state="speaking"] .assistant-status-dot {
   min-width: 0;
 }
 
-.widgets-right-column .agenda-card .card-title {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
+.widgets-right-column .agenda-card .card-title,
 .widgets-right-column .agenda-card .card-subtitle-small {
   white-space: nowrap;
   overflow: hidden;
@@ -613,22 +687,60 @@ body[data-state="speaking"] .assistant-status-dot {
 
   .dock-grid {
     grid-template-columns: 1fr;
-    gap: 16px;
+    gap: 18px;
     align-items: start;
   }
 
   .hero-left-column {
-    gap: 12px;
+    gap: 18px;
+    padding-top: 8px;
+  }
+
+  .hero-left-column .clock-block {
+    flex: 0 0 auto;
+  }
+
+  .hero-left-column .date-pill {
+    font-size: 1rem;
+    padding: 6px 15px;
   }
 
   .hero-left-column .clock-time {
-    font-size: clamp(4.4rem, 20vw, 6.2rem);
+    font-size: clamp(5.2rem, 24vw, 7.2rem);
   }
 
   .assistant-panel.frameless-panel {
+    flex: 0 0 auto;
     max-width: 100%;
-    min-height: 290px;
-    max-height: 52dvh;
+    gap: 14px;
+  }
+
+  body.conversation-open .hero-left-column .clock-time {
+    font-size: clamp(2.4rem, 11vw, 3.2rem);
+  }
+
+  body.conversation-open .chat-messages {
+    max-height: 38dvh;
+  }
+
+  .voice-controls-row {
+    gap: 10px;
+  }
+
+  .voice-controls-row .mic-stage {
+    width: 112px;
+    height: 112px;
+  }
+
+  .voice-controls-row .mic-btn {
+    width: 88px;
+    height: 88px;
+  }
+
+  .voice-side-btn {
+    height: 38px;
+    padding: 0 11px;
+    font-size: 0.78rem;
   }
 
   .widgets-right-column {
@@ -639,16 +751,6 @@ body[data-state="speaking"] .assistant-status-dot {
   .widgets-right-column .agenda-card {
     min-height: 250px;
     max-height: 48dvh;
-  }
-
-  .voice-controls-row {
-    gap: 8px;
-  }
-
-  .voice-side-btn {
-    height: 36px;
-    padding: 0 10px;
-    font-size: 0.74rem;
   }
 
   .stop-voice-btn span {
@@ -681,26 +783,25 @@ body[data-state="speaking"] .assistant-status-dot {
   }
 
   .hero-left-column {
-    gap: 5px;
-    padding: 0;
+    gap: 6px;
   }
 
   .hero-left-column .clock-block {
-    gap: 2px;
+    gap: 3px;
   }
 
   .hero-left-column .date-pill {
-    padding: 2px 10px;
-    font-size: 0.72rem;
-    gap: 5px;
+    padding: 3px 12px;
+    font-size: 0.82rem;
+    gap: 6px;
   }
 
   .hero-left-column .clock-time {
-    font-size: clamp(2.6rem, 13vh, 3.8rem);
+    font-size: clamp(3.6rem, 20vh, 5.2rem);
   }
 
   .hero-left-column .clock-seconds {
-    font-size: clamp(0.9rem, 4vh, 1.3rem);
+    font-size: clamp(1.1rem, 5vh, 1.55rem);
   }
 
   .hero-left-column .next-event-chip {
@@ -708,51 +809,95 @@ body[data-state="speaking"] .assistant-status-dot {
   }
 
   .assistant-panel.frameless-panel {
+    gap: 8px;
+  }
+
+  .voice-controls-row {
+    gap: 10px;
+  }
+
+  .voice-controls-row .mic-stage {
+    width: 78px;
+    height: 78px;
+  }
+
+  .voice-controls-row .mic-btn {
+    width: 62px;
+    height: 62px;
+  }
+
+  .voice-controls-row .mic-icon {
+    width: 24px;
+    height: 24px;
+  }
+
+  .voice-side-btn {
+    height: 32px;
+    padding: 0 10px;
+    font-size: 0.72rem;
     gap: 5px;
   }
 
-  .assistant-panel-header {
-    padding-bottom: 4px;
+  /* Conversa ativa no Landscape compacto */
+  body.conversation-open .hero-left-column {
+    gap: 4px;
   }
 
-  .model-chip {
+  body.conversation-open .hero-left-column .date-pill {
     display: none;
   }
 
-  .stop-voice-btn {
+  body.conversation-open .hero-left-column .clock-time {
+    font-size: clamp(1.6rem, 8.5vh, 2.2rem);
+  }
+
+  body.conversation-open .hero-left-column .clock-seconds {
+    font-size: 0.78rem;
+  }
+
+  body.conversation-open .assistant-panel.frameless-panel {
+    gap: 4px;
+  }
+
+  body.conversation-open .model-chip {
+    display: none;
+  }
+
+  body.conversation-open .stop-voice-btn {
     height: 24px;
     padding: 0 8px;
     font-size: 0.66rem;
   }
 
-  .chat-bubble {
+  body.conversation-open .chat-bubble {
     padding: 6px 9px;
     border-radius: 12px;
   }
 
-  .chat-bubble-text {
-    font-size: 0.76rem;
+  body.conversation-open .chat-bubble-text {
+    font-size: 0.78rem;
     line-height: 1.35;
   }
 
-  .assistant-status-bar {
-    min-height: 14px;
+  body.conversation-open .voice-controls-row .mic-stage {
+    width: 48px;
+    height: 48px;
   }
 
-  .assistant-status {
-    font-size: 0.66rem;
+  body.conversation-open .voice-controls-row .mic-btn {
+    width: 38px;
+    height: 38px;
   }
 
-  .voice-controls-row {
-    gap: 8px;
-    padding: 0;
+  body.conversation-open .voice-controls-row .mic-icon {
+    width: 17px;
+    height: 17px;
   }
 
-  .voice-side-btn {
-    height: 28px;
+  body.conversation-open .voice-side-btn {
+    height: 26px;
     padding: 0 8px;
-    font-size: 0.68rem;
-    gap: 5px;
+    font-size: 0.66rem;
   }
 
   .mini-switch {
@@ -767,21 +912,6 @@ body[data-state="speaking"] .assistant-status-dot {
 
   .continuous-toggle-btn[aria-pressed="true"] .mini-switch-knob {
     transform: translateX(10px);
-  }
-
-  .voice-controls-row .mic-stage {
-    width: 52px;
-    height: 52px;
-  }
-
-  .voice-controls-row .mic-btn {
-    width: 42px;
-    height: 42px;
-  }
-
-  .voice-controls-row .mic-icon {
-    width: 18px;
-    height: 18px;
   }
 
   .widgets-right-column {
