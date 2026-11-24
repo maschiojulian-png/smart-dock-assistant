@@ -164,34 +164,7 @@
             </button>
           </div>
 
-          <div class="assistant-status-row">
-            <p class="assistant-status" id="assistantStatus">Toque no microfone para falar com o Gemini</p>
-            <button
-              type="button"
-              class="fluid-mode-pill"
-              id="fluidModeBtn"
-              aria-pressed="true"
-              title="Reabrir microfone automaticamente após a IA responder"
-            >
-              <span class="fluid-dot" aria-hidden="true"></span>
-              <span>Conversa contínua</span>
-            </button>
-          </div>
-
-          <!-- Sugestões Rápidas (1 toque) -->
-          <div class="quick-prompts" id="quickPrompts" aria-label="Comandos rápidos">
-            <button type="button" class="quick-chip" data-prompt="Faça um resumo curto do meu dia com base na minha agenda e no clima atual.">
-              <span class="chip-dot-color blue"></span>Resumo do dia
-            </button>
-            <button type="button" class="quick-chip" data-prompt="Como está o clima agora e vai chover hoje?">
-              <span class="chip-dot-color orange"></span>Como está o tempo?
-            </button>
-            <button type="button" class="quick-chip" data-prompt="Qual é o meu próximo compromisso hoje?">
-              <span class="chip-dot-color green"></span>Próximo evento
-            </button>
-          </div>
-
-          <!-- Cartão de Transcrição e Resposta -->
+          <!-- Cartão de Transcrição e Resposta (apenas pergunta e resposta) -->
           <div class="response-card hidden" id="responseCard" aria-live="polite">
             <div class="response-header">
               <span class="response-tag" id="responseTag">
@@ -205,7 +178,7 @@
                     <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
                   </svg>
                 </button>
-                <button type="button" class="mini-icon-btn" id="clearResponseBtn" title="Limpar conversa" aria-label="Limpar conversa">
+                <button type="button" class="mini-icon-btn" id="clearResponseBtn" title="Fechar conversa" aria-label="Fechar conversa">
                   <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
@@ -213,8 +186,10 @@
                 </button>
               </div>
             </div>
-            <p class="user-transcript hidden" id="userTranscript"></p>
-            <p class="assistant-reply" id="assistantReply"></p>
+            <div class="response-body">
+              <p class="user-transcript hidden" id="userTranscript"></p>
+              <p class="assistant-reply" id="assistantReply"></p>
+            </div>
           </div>
 
           <!-- Entrada de Texto Alternativa estilo iOS Spotlight -->

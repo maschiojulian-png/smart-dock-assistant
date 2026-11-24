@@ -1,53 +1,242 @@
 /* ==========================================================================
-   Conversa Fluida, Alternador Dia/Semana e Modais Expandidos (Clima & Agenda)
+   Layout Adaptativo de Voz + Relógio Dinâmico + Modais Expandidos (Clima & Agenda)
    ========================================================================== */
-.assistant-status-row {
+
+/* ---- Transições suaves de Relógio & Microfone (Idle grande -> Conversando compacto no topo) ---- */
+.hero-column {
+  transition: justify-content var(--transition-smooth), gap var(--transition-smooth);
+}
+
+.clock-block,
+.clock-time,
+.clock-seconds,
+.mic-stage,
+.mic-btn {
+  transition:
+    font-size var(--transition-smooth),
+    width var(--transition-smooth),
+    height var(--transition-smooth),
+    transform var(--transition-smooth),
+    opacity var(--transition-fast),
+    margin var(--transition-smooth);
+}
+
+/* Estado ocioso (não clicando no microfone): números do relógio MAIORES e imponentes */
+.clock-time {
+  font-size: clamp(5.8rem, 13vw, 10.2rem);
+}
+
+/* Estado conversando (ouvindo / pensando / falando / com resposta aberta):
+   Relógio diminui suavemente e microfone sobe mais para cima, sem cortar o texto embaixo! */
+body.voice-active .hero-column {
+  justify-content: flex-start;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+body.voice-active .clock-block {
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+body.voice-active .date-pill {
+  padding: 3px 10px;
+  font-size: 0.74rem;
+}
+
+body.voice-active .clock-display {
+  margin-top: 2px;
+}
+
+body.voice-active .clock-time {
+  font-size: clamp(2.6rem, 5.2vw, 3.8rem);
+}
+
+body.voice-active .clock-seconds {
+  font-size: clamp(0.95rem, 1.8vw, 1.35rem);
+}
+
+body.voice-active .next-event-chip {
+  display: none;
+}
+
+body.voice-active .assistant-block {
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
+  justify-content: flex-start;
+}
+
+body.voice-active .mic-stage {
+  width: 96px;
+  height: 96px;
+  flex-shrink: 0;
+}
+
+body.voice-active .mic-btn {
+  width: 76px;
+  height: 76px;
+}
+
+/* Cartão de resposta limpo: flexível para NUNCA cortar na parte inferior */
+.response-card {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+  flex-direction: column;
+  min-height: 0;
 }
 
-.fluid-mode-pill {
-  display: inline-flex;
-  align-items: center;
+body.voice-active .response-card {
+  flex: 1;
+  min-height: 84px;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.response-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--label-tertiary);
-  font-size: 0.72rem;
-  font-weight: 500;
-  transition: all var(--transition-fast);
+  padding-right: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
 
-.fluid-mode-pill:hover {
-  background: rgba(255, 255, 255, 0.11);
-  color: var(--label-primary);
+.response-body .assistant-reply {
+  max-height: none;
+  overflow: visible;
 }
 
-.fluid-mode-pill[aria-pressed="true"] {
-  background: rgba(76, 139, 245, 0.16);
-  border-color: rgba(76, 139, 245, 0.38);
-  color: #b7d4ff;
+.text-fallback {
+  flex-shrink: 0;
 }
 
-.fluid-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: rgba(148, 163, 184, 0.45);
-  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+/* ---- Celular Retrato (Portrait) ---- */
+@media (max-width: 919px) and (orientation: portrait) {
+  .clock-time {
+    font-size: clamp(5.2rem, 24vw, 7.2rem);
+  }
+
+  .hero-column {
+    gap: 14px;
+    padding-bottom: 4px;
+  }
+
+  body.voice-active .clock-time {
+    font-size: clamp(2.4rem, 11.5vw, 3.3rem);
+  }
+
+  body.voice-active .mic-stage {
+    width: 88px;
+    height: 88px;
+  }
+
+  body.voice-active .mic-btn {
+    width: 70px;
+    height: 70px;
+  }
+
+  body.voice-active .response-card {
+    flex: 0 1 auto;
+    max-height: 40dvh;
+  }
+
+  .app-shell {
+    padding-bottom: calc(28px + var(--safe-bottom));
+  }
 }
 
-.fluid-mode-pill[aria-pressed="true"] .fluid-dot {
-  background: var(--ios-blue);
-  box-shadow: 0 0 8px rgba(76, 139, 245, 0.85);
+/* ---- Celular Horizontal (Landscape StandBy — max-height: 540px) ---- */
+@media (orientation: landscape) and (max-height: 540px) {
+  /* Ocioso: relógio bem maior */
+  .clock-time {
+    font-size: clamp(3.8rem, 22vh, 5.4rem);
+  }
+
+  .hero-column {
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .assistant-block {
+    gap: 8px;
+  }
+
+  /* Quando começa a falar: hora bem compacta no topo, microfone sobe,
+     e o cartão de texto ocupa o espaço restante sem NUNCA cortar embaixo! */
+  body.voice-active .hero-column {
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 0;
+  }
+
+  body.voice-active .date-pill {
+    display: none;
+  }
+
+  body.voice-active .clock-display {
+    margin-top: 0;
+  }
+
+  body.voice-active .clock-time {
+    font-size: clamp(1.7rem, 9.5vh, 2.35rem);
+  }
+
+  body.voice-active .clock-seconds {
+    font-size: 0.82rem;
+  }
+
+  body.voice-active .assistant-block {
+    flex: 1;
+    min-height: 0;
+    gap: 5px;
+    width: 100%;
+  }
+
+  body.voice-active .mic-stage {
+    width: 54px;
+    height: 54px;
+  }
+
+  body.voice-active .mic-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  body.voice-active .mic-icon {
+    width: 19px;
+    height: 19px;
+  }
+
+  body.voice-active .response-card {
+    flex: 1;
+    min-height: 58px;
+    padding: 6px 10px;
+  }
+
+  body.voice-active .response-header {
+    margin-bottom: 3px;
+  }
+
+  body.voice-active .user-transcript {
+    font-size: 0.72rem;
+    margin: 0;
+  }
+
+  body.voice-active .assistant-reply {
+    font-size: 0.8rem;
+    line-height: 1.38;
+  }
+
+  .seg-btn {
+    padding: 2px 7px;
+    font-size: 0.62rem;
+  }
 }
 
-/* Widgets clicáveis para abrir em tela grande */
+/* ---- Widgets clicáveis para abrir em tela grande ---- */
 .weather-widget,
 .agenda-card {
   cursor: pointer;
@@ -478,13 +667,6 @@
   background: linear-gradient(90deg, #64d2ff 0%, #ffd60a 65%, #ff9f0a 100%);
 }
 
-/* Evita que o response-card esprema o microfone em telas curtas/horizontais */
-@media (max-height: 700px) {
-  body.has-response .quick-prompts {
-    display: none;
-  }
-}
-
 @media (max-width: 760px) {
   .weather-charts-grid,
   .new-event-grid {
@@ -495,17 +677,5 @@
     grid-template-columns: 74px 28px 36px 32px 1fr 32px;
     gap: 6px;
     padding: 7px 8px;
-  }
-}
-
-@media (orientation: landscape) and (max-height: 540px) {
-  .fluid-mode-pill {
-    padding: 2px 8px;
-    font-size: 0.64rem;
-  }
-
-  .seg-btn {
-    padding: 2px 7px;
-    font-size: 0.62rem;
   }
 }
