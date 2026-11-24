@@ -67,6 +67,7 @@
     serverGeminiConfigured: false,
     serverGoogleClientId: '',
     recognition: null,
+    forceStopListening: null,
     finalTranscript: '',
     lastReply: '',
     chatHistory: [],
@@ -279,7 +280,7 @@
     } else {
       const defaultLabels = {
         idle: 'Toque no microfone para falar com o Gemini',
-        listening: 'Ouvindo você em português... toque para encerrar',
+        listening: 'Ouvindo... pare de falar para enviar automaticamente',
         thinking: 'Consultando Gemini...',
         speaking: 'Falando — toque no botão para parar',
       };
@@ -335,9 +336,14 @@
 
   function setupAudioUnlockListeners() {
     const events = ['touchstart', 'pointerdown', 'click'];
-    const handler = () => {
+    const handler = (evt) => {
+      // Se o primeiro toque for direto no microfone, não dispara speechSynthesis/AudioContext
+      // simultaneamente para não disputar a sessão de áudio com o SpeechRecognition no iOS
+      if (evt?.target?.closest && evt.target.closest('#micBtn')) {
+        return;
+      }
       unlockAudioOnFirstGesture();
-      events.forEach((evt) => window.removeEventListener(evt, handler, true));
+      events.forEach((e) => window.removeEventListener(e, handler, true));
     };
     events.forEach((evt) => window.addEventListener(evt, handler, { capture: true, passive: true }));
 
@@ -1395,18 +1401,29 @@
   }
 
   function startVoiceRecognition() {
-    unlockAudioOnFirstGesture();
-
+    // Se estiver falando, tocar no botão interrompe a fala
     if (state.assistantState === 'speaking') {
       stopSpeaking();
       return;
     }
 
-    if (state.assistantState === 'listening' && state.recognition) {
-      state.recognition.stop();
+    // Se já estiver ouvindo, encerra imediatamente e envia o que foi captado
+    if (state.assistantState === 'listening') {
+      if (typeof state.forceStopListening === 'function') {
+        state.forceStopListening();
+      } else if (state.recognition) {
+        try {
+          state.recognition.stop();
+        } catch {
+          setAssistantState('idle');
+        }
+      } else {
+        setAssistantState('idle');
+      }
       return;
     }
 
+    // Se estiver consultando o Gemini, cancela a requisição
     if (state.assistantState === 'thinking' && state.currentAbortController) {
       state.currentAbortController.abort();
       state.currentAbortController = null;
@@ -1428,71 +1445,65 @@
       return;
     }
 
+    // Para qualquer síntese de fala ativa sem tocar chime/AudioContext durante a abertura do microfone
+    // (evita conflito de sessão de áudio no iOS Safari, Bluetooth e Windows)
     stopSpeaking();
+    if (!state.audioUnlocked) {
+      state.audioUnlocked = true;
+      el.audioUnlockPill.classList.add('unlocked');
+    }
+
+    // Garante que nenhuma instância antiga ficou presa
+    if (state.recognition) {
+      try {
+        state.recognition.onresult = null;
+        state.recognition.onerror = null;
+        state.recognition.onend = null;
+        state.recognition.abort();
+      } catch {
+        // Ignora
+      }
+      state.recognition = null;
+    }
+
+    const SILENCE_AUTO_STOP_MS = 1600; // Para automaticamente 1,6s após você terminar de falar
+    const SPEECH_END_GRACE_MS = 450;   // Encerra rápido quando o navegador detecta fim de fala
+    const INITIAL_NO_SPEECH_MS = 8500; // Tempo máximo aguardando você começar a falar
+    const STOP_FALLBACK_MS = 750;      // Fallback caso o Safari não dispare onend após stop()
 
     const recognition = new SpeechRec();
     recognition.lang = 'pt-BR';
     recognition.interimResults = true;
-    recognition.continuous = false;
+    recognition.continuous = true; // Controlamos o auto-stop por silêncio para funcionar igual no iOS e Desktop
     recognition.maxAlternatives = 1;
 
     state.recognition = recognition;
     state.finalTranscript = '';
     let latestTranscript = '';
+    let silenceTimer = null;
+    let initialTimer = null;
+    let stopFallbackTimer = null;
+    let hasStopped = false;
+    let isFinalized = false;
 
-    recognition.onstart = () => {
-      playChime('start');
-      setAssistantState('listening');
-      el.responseCard.classList.remove('hidden');
-      el.userTranscript.classList.remove('hidden');
-      el.userTranscript.textContent = 'Ouvindo...';
-      el.assistantReply.textContent = '';
+    const clearAllTimers = () => {
+      if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+      if (initialTimer) { clearTimeout(initialTimer); initialTimer = null; }
+      if (stopFallbackTimer) { clearTimeout(stopFallbackTimer); stopFallbackTimer = null; }
     };
 
-    recognition.onresult = (event) => {
-      let interim = '';
-      let finalText = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalText += transcript;
-        } else {
-          interim += transcript;
-        }
-      }
-      if (finalText) {
-        state.finalTranscript += finalText;
-      }
-      latestTranscript = (state.finalTranscript + interim).trim();
-      if (latestTranscript) {
-        el.userTranscript.textContent = `“${latestTranscript}”`;
-      }
-    };
+    const finalizeListening = (skipGemini = false) => {
+      if (isFinalized) return;
+      isFinalized = true;
+      clearAllTimers();
+      state.forceStopListening = null;
 
-    recognition.onerror = (event) => {
-      console.warn('SpeechRecognition error:', event.error);
-      playChime('error');
-      const errorMessages = {
-        'not-allowed': 'Permissão de microfone negada (no iPhone exige HTTPS).',
-        'service-not-allowed': 'Serviço de voz bloqueado no dispositivo.',
-        'no-speech': 'Não ouvi nenhuma fala. Tente novamente falando mais perto.',
-        'audio-capture': 'Nenhum microfone encontrado.',
-        network: 'Erro de rede no reconhecimento de voz.',
-      };
-      const msg = errorMessages[event.error];
-      if (msg && event.error !== 'aborted') {
-        showToast(msg, 'error', 4200);
+      if (state.recognition === recognition) {
+        state.recognition = null;
       }
-      if (state.assistantState === 'listening') {
-        setAssistantState('idle');
-      }
-    };
 
-    recognition.onend = () => {
-      state.recognition = null;
-      const question = (state.finalTranscript || latestTranscript).trim();
-      if (question) {
-        playChime('end');
+      const question = (latestTranscript || state.finalTranscript).trim();
+      if (!skipGemini && question) {
         askGemini(question);
       } else if (state.assistantState === 'listening') {
         setAssistantState('idle');
@@ -1502,11 +1513,115 @@
       }
     };
 
+    const triggerAutoStop = () => {
+      if (hasStopped || isFinalized) return;
+      hasStopped = true;
+      clearAllTimers();
+      try {
+        recognition.stop();
+      } catch {
+        finalizeListening(false);
+        return;
+      }
+      // Garante encerramento mesmo se o navegador não disparar onend após stop()
+      stopFallbackTimer = setTimeout(() => {
+        try { recognition.abort(); } catch { /* ignora */ }
+        finalizeListening(false);
+      }, STOP_FALLBACK_MS);
+    };
+
+    state.forceStopListening = triggerAutoStop;
+
+    recognition.onstart = () => {
+      setAssistantState('listening');
+      el.responseCard.classList.remove('hidden');
+      el.userTranscript.classList.remove('hidden');
+      el.userTranscript.textContent = 'Ouvindo... pode falar';
+      el.assistantReply.textContent = '';
+
+      // Se nada for falado em 8,5s, encerra sozinho sem travar
+      initialTimer = setTimeout(() => {
+        if (!latestTranscript.trim()) {
+          showToast('Não ouvi nenhuma fala. Tente novamente.', 'info', 3000);
+          triggerAutoStop();
+        }
+      }, INITIAL_NO_SPEECH_MS);
+    };
+
+    recognition.onresult = (event) => {
+      // Reconstrói sempre do índice 0 para evitar perda/duplicação de palavras no Safari iOS e Chrome
+      let fullText = '';
+      let finalOnly = '';
+      for (let i = 0; i < event.results.length; i++) {
+        const res = event.results[i];
+        const piece = res[0]?.transcript || '';
+        fullText += piece;
+        if (res.isFinal) {
+          finalOnly += piece;
+        }
+      }
+
+      state.finalTranscript = finalOnly.trim();
+      latestTranscript = fullText.trim();
+
+      if (latestTranscript) {
+        if (initialTimer) {
+          clearTimeout(initialTimer);
+          initialTimer = null;
+        }
+        el.userTranscript.textContent = `“${latestTranscript}”`;
+
+        // Reinicia o detector de silêncio: parou de falar por 1,6s -> para de escutar sozinho!
+        if (silenceTimer) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+          triggerAutoStop();
+        }, SILENCE_AUTO_STOP_MS);
+      }
+    };
+
+    recognition.onspeechend = () => {
+      if (latestTranscript.trim() && !hasStopped) {
+        if (silenceTimer) clearTimeout(silenceTimer);
+        silenceTimer = setTimeout(() => {
+          triggerAutoStop();
+        }, SPEECH_END_GRACE_MS);
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.warn('SpeechRecognition error:', event.error);
+      // Se já captou texto antes de um erro leve (ex: no-speech/aborted após stop), ainda envia!
+      if (latestTranscript.trim() && (event.error === 'no-speech' || event.error === 'aborted')) {
+        finalizeListening(false);
+        return;
+      }
+
+      const errorMessages = {
+        'not-allowed': 'Permissão de microfone negada. Libere o microfone nas configurações do navegador.',
+        'service-not-allowed': 'Serviço de voz bloqueado no dispositivo.',
+        'no-speech': 'Não ouvi nenhuma fala. Tente novamente falando mais perto.',
+        'audio-capture': 'Nenhum microfone encontrado ou em uso por outro app.',
+        network: 'Erro de rede no reconhecimento de voz do navegador.',
+      };
+      const msg = errorMessages[event.error] || (event.error !== 'aborted' ? `Erro no microfone: ${event.error}` : '');
+      if (msg) {
+        showToast(msg, 'error', 4200);
+      }
+      finalizeListening(true);
+    };
+
+    recognition.onend = () => {
+      finalizeListening(false);
+    };
+
     try {
       recognition.start();
     } catch (err) {
       console.error('Erro ao iniciar SpeechRecognition:', err);
-      showToast('Não foi possível iniciar o microfone.', 'error', 3500);
+      clearAllTimers();
+      state.recognition = null;
+      state.forceStopListening = null;
+      showToast('Não foi possível iniciar o microfone. Recarregue a página e tente novamente.', 'error', 3800);
       setAssistantState('idle');
     }
   }
