@@ -17,8 +17,9 @@
     SESSION_TOKEN: 'smartdock_gcal_token_session',
   };
 
-  const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
-  const GEMINI_FALLBACK_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
+  const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
+  const GEMINI_FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+  const GEMINI_REQUEST_TIMEOUT_MS = 16000;
   const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
   const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
   const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
@@ -1425,6 +1426,7 @@
 
     // Se estiver consultando o Gemini, cancela a requisição
     if (state.assistantState === 'thinking' && state.currentAbortController) {
+      state.currentAbortController._userCancelled = true;
       state.currentAbortController.abort();
       state.currentAbortController = null;
       setAssistantState('idle');
@@ -1626,6 +1628,77 @@
     }
   }
 
+  function getThinkingConfigForModel(model) {
+    if (model === 'gemini-3.5-flash-lite') {
+      return { thinkingLevel: 'minimal' };
+    }
+    if (model === 'gemini-3.8-flash' || model === 'gemini-4-hydrogen') {
+      return { thinkingLevel: 'low' };
+    }
+    return null;
+  }
+
+  function extractGeminiReply(data) {
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const visibleParts = parts.filter((p) => !p.thought && typeof p.text === 'string' && p.text.trim());
+    const sourceParts = visibleParts.length ? visibleParts : parts;
+    return sourceParts
+      .map((p) => (typeof p.text === 'string' ? p.text : ''))
+      .join(' ')
+      .trim();
+  }
+
+  function isRetryableGeminiError(status, message, isTimeout = false) {
+    if (isTimeout) return true;
+    if ([404, 429, 500, 502, 503, 504].includes(status)) return true;
+    const lower = String(message || '').toLowerCase();
+    return (
+      lower.includes('no longer available') ||
+      lower.includes('not found') ||
+      lower.includes('deprecated') ||
+      lower.includes('not supported') ||
+      lower.includes('overloaded') ||
+      lower.includes('unavailable') ||
+      lower.includes('rate limit') ||
+      lower.includes('quota')
+    );
+  }
+
+  async function fetchWithTimeout(url, options, timeoutMs, parentSignal) {
+    const attemptController = new AbortController();
+    let timedOut = false;
+
+    const onParentAbort = () => attemptController.abort();
+    if (parentSignal) {
+      if (parentSignal.aborted) {
+        attemptController.abort();
+      } else {
+        parentSignal.addEventListener('abort', onParentAbort, { once: true });
+      }
+    }
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      attemptController.abort();
+    }, timeoutMs);
+
+    try {
+      return await fetch(url, { ...options, signal: attemptController.signal });
+    } catch (err) {
+      if (timedOut) {
+        const timeoutErr = new Error('Tempo limite excedido ao aguardar resposta do Gemini.');
+        timeoutErr.isTimeout = true;
+        throw timeoutErr;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      if (parentSignal) {
+        parentSignal.removeEventListener('abort', onParentAbort);
+      }
+    }
+  }
+
   async function askGemini(question) {
     const apiKey = getGeminiKey();
     const useServerProxy = !apiKey && state.serverGeminiConfigured;
@@ -1634,6 +1707,13 @@
       showToast('Configure sua GEMINI_API_KEY nos Ajustes.', 'error', 4000);
       openSettingsModal('geminiKeyInput');
       return;
+    }
+
+    // Cancela qualquer consulta anterior que ainda esteja em andamento
+    if (state.currentAbortController) {
+      state.currentAbortController._superseded = true;
+      state.currentAbortController.abort();
+      state.currentAbortController = null;
     }
 
     stopSpeaking();
@@ -1680,34 +1760,40 @@
 
     try {
       const selectedModel = state.prefs.geminiModel || DEFAULT_GEMINI_MODEL;
-      const requestPayload = {
+      const basePayload = {
         systemInstruction: {
           parts: [{ text: systemPrompt }],
         },
         contents,
         generationConfig: {
           temperature: 0.7,
-          maxOutputTokens: 512,
+          maxOutputTokens: 1024,
         },
       };
 
       let data = {};
+      let rawReply = '';
       let modelUsed = selectedModel;
 
       if (useServerProxy) {
-        const response = await fetch('./api/gemini', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({ ...requestPayload, model: selectedModel }),
-        });
+        const response = await fetchWithTimeout(
+          './api/gemini',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...basePayload, model: selectedModel }),
+          },
+          22000,
+          controller.signal
+        );
         data = await response.json().catch(() => ({}));
         if (!response.ok) {
           throw new Error(data?.error?.message || `Erro HTTP ${response.status}`);
         }
         modelUsed = data._modelUsed || selectedModel;
+        rawReply = extractGeminiReply(data);
       } else {
-        // Chamada direta com fallback automático caso um modelo seja descontinuado
+        // Chamada direta com timeout + fallback automático entre modelos
         const modelsToTry = [
           selectedModel,
           ...GEMINI_FALLBACK_MODELS.filter((m) => m !== selectedModel),
@@ -1715,30 +1801,74 @@
         let succeeded = false;
         let lastError = 'Erro ao consultar o Gemini.';
 
-        for (const candidateModel of modelsToTry) {
+        const callDirect = async (candidateModel, includeThinking) => {
+          const thinkingConfig = includeThinking ? getThinkingConfigForModel(candidateModel) : null;
+          const payload = {
+            ...basePayload,
+            generationConfig: {
+              ...basePayload.generationConfig,
+              ...(thinkingConfig ? { thinkingConfig } : {}),
+            },
+          };
           const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(candidateModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-          const response = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal,
-            body: JSON.stringify(requestPayload),
-          });
-          data = await response.json().catch(() => ({}));
-          if (response.ok) {
-            modelUsed = candidateModel;
-            succeeded = true;
-            break;
+          const response = await fetchWithTimeout(
+            endpoint,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+            },
+            GEMINI_REQUEST_TIMEOUT_MS,
+            controller.signal
+          );
+          const json = await response.json().catch(() => ({}));
+          return { response, json };
+        };
+
+        for (let idx = 0; idx < modelsToTry.length; idx++) {
+          const candidateModel = modelsToTry[idx];
+          if (idx > 0) {
+            el.assistantStatus.textContent = `Tentando modelo alternativo (${candidateModel})...`;
           }
-          const apiMsg = data?.error?.message || `Erro HTTP ${response.status}`;
-          lastError = apiMsg;
-          const lower = apiMsg.toLowerCase();
-          const isModelIssue =
-            response.status === 404 ||
-            lower.includes('no longer available') ||
-            lower.includes('not found') ||
-            lower.includes('deprecated');
-          if (!isModelIssue) {
-            break;
+
+          try {
+            let { response, json } = await callDirect(candidateModel, true);
+
+            // Se o modelo rejeitar thinkingConfig com HTTP 400, tenta novamente sem ele
+            if (
+              !response.ok &&
+              response.status === 400 &&
+              /thinking/i.test(json?.error?.message || '')
+            ) {
+              ({ response, json } = await callDirect(candidateModel, false));
+            }
+
+            data = json;
+            if (response.ok) {
+              const extracted = extractGeminiReply(data);
+              if (extracted) {
+                rawReply = extracted;
+                modelUsed = candidateModel;
+                succeeded = true;
+                break;
+              }
+              lastError = 'O Gemini retornou uma resposta vazia.';
+              continue;
+            }
+
+            const apiMsg = data?.error?.message || `Erro HTTP ${response.status}`;
+            lastError = apiMsg;
+            if (!isRetryableGeminiError(response.status, apiMsg, false)) {
+              break;
+            }
+          } catch (attemptErr) {
+            if (controller._userCancelled || controller._superseded) {
+              throw attemptErr;
+            }
+            lastError = attemptErr.message || 'Falha de rede ao consultar o Gemini.';
+            if (!isRetryableGeminiError(0, lastError, Boolean(attemptErr.isTimeout))) {
+              break;
+            }
           }
         }
 
@@ -1750,12 +1880,6 @@
       if (el.responseModelLabel) {
         el.responseModelLabel.textContent = modelUsed.replace(/-/g, ' ');
       }
-
-      const rawReply =
-        data?.candidates?.[0]?.content?.parts
-          ?.map((p) => p.text || '')
-          .join(' ')
-          .trim() || '';
 
       if (!rawReply) {
         throw new Error('O Gemini retornou uma resposta vazia.');
@@ -1774,15 +1898,26 @@
       el.assistantReply.textContent = cleanReply;
       speakText(cleanReply);
     } catch (err) {
-      if (err.name === 'AbortError') return;
+      if (controller._superseded) return;
+      if (controller._userCancelled) {
+        if (state.assistantState === 'thinking') {
+          setAssistantState('idle');
+        }
+        return;
+      }
       console.error('Erro Gemini API:', err);
       playChime('error');
       const friendlyErr = `Não consegui consultar o Gemini: ${err.message}`;
       el.assistantReply.textContent = friendlyErr;
-      showToast(friendlyErr, 'error', 5000);
+      showToast(friendlyErr, 'error', 5500);
       setAssistantState('idle');
     } finally {
-      state.currentAbortController = null;
+      if (state.currentAbortController === controller) {
+        state.currentAbortController = null;
+        if (state.assistantState === 'thinking') {
+          setAssistantState('idle');
+        }
+      }
     }
   }
 
