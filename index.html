@@ -108,112 +108,35 @@
       </div>
     </header>
 
-    <!-- Bento Grid Estilo Apple iOS / StandBy -->
+    <!-- Novo Layout Lado a Lado: Topo (Relógio + Data | Clima) + Base (Agenda | Assistente) -->
     <main class="dock-grid">
-      <!-- Coluna Esquerda: Relógio StandBy + Assistente Apple Intelligence / Gemini -->
-      <section class="hero-column" aria-label="Relógio e Assistente de Voz">
-        <!-- Bloco do Relógio -->
-        <div class="clock-block">
-          <div class="date-pill">
-            <span class="greeting-badge" id="greetingText">Boa noite</span>
-            <span class="date-separator" aria-hidden="true">•</span>
-            <span class="date-display" id="dateDisplay">Carregando data...</span>
-          </div>
-
-          <div class="clock-display" aria-live="off">
-            <span class="clock-time" id="clockTime">00:00</span>
-            <div class="clock-side-meta">
-              <span class="clock-ampm hidden" id="clockAmPm"></span>
-              <span class="clock-seconds" id="clockSeconds">00</span>
+      <!-- TOPO: Relógio & Data à Esquerda + Widget de Clima bem ao lado Direito -->
+      <section class="top-hero-row" aria-label="Relógio, Data e Clima">
+        <!-- Bloco do Relógio e Data (fonte grande e legível à distância) -->
+        <div class="ios-widget clock-hero-card">
+          <div class="clock-block">
+            <div class="date-pill">
+              <span class="greeting-badge" id="greetingText">Boa tarde</span>
+              <span class="date-separator" aria-hidden="true">•</span>
+              <span class="date-display" id="dateDisplay">Carregando data...</span>
             </div>
-          </div>
 
-          <div class="next-event-chip hidden" id="nextEventChip">
-            <span class="chip-dot"></span>
-            <span id="nextEventChipText"></span>
+            <div class="clock-display" aria-live="off">
+              <span class="clock-time" id="clockTime">00:00</span>
+              <div class="clock-side-meta">
+                <span class="clock-ampm hidden" id="clockAmPm"></span>
+                <span class="clock-seconds" id="clockSeconds">00</span>
+              </div>
+            </div>
+
+            <div class="next-event-chip hidden" id="nextEventChip">
+              <span class="chip-dot"></span>
+              <span id="nextEventChipText"></span>
+            </div>
           </div>
         </div>
 
-        <!-- Bloco do Assistente por Voz (Orb estilo Apple Intelligence) -->
-        <div class="assistant-block">
-          <div class="mic-stage">
-            <div class="siri-halo" aria-hidden="true"></div>
-            <div class="mic-ring ring-1" aria-hidden="true"></div>
-            <div class="mic-ring ring-2" aria-hidden="true"></div>
-            <button
-              type="button"
-              class="mic-btn"
-              id="micBtn"
-              aria-label="Falar com o assistente Gemini"
-            >
-              <span class="mic-core" aria-hidden="true"></span>
-              <!-- Ícone Microfone (Idle) -->
-              <svg class="mic-icon icon-mic" viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                <line x1="12" x2="12" y1="19" y2="22"></line>
-              </svg>
-
-              <!-- Ondas Animadas (Listening / Speaking) -->
-              <div class="voice-bars" aria-hidden="true">
-                <span></span><span></span><span></span><span></span><span></span>
-              </div>
-
-              <!-- Spinner (Thinking) -->
-              <div class="thinking-spinner" aria-hidden="true"></div>
-            </button>
-          </div>
-
-          <!-- Cartão de Transcrição e Resposta (apenas pergunta e resposta) -->
-          <div class="response-card hidden" id="responseCard" aria-live="polite">
-            <div class="response-header">
-              <span class="response-tag" id="responseTag">
-                <span class="gemini-spark" aria-hidden="true">✦</span> <span id="responseModelLabel">Gemini 3.5 Flash Lite</span>
-              </span>
-              <div class="response-actions">
-                <button type="button" class="mini-icon-btn" id="replayVoiceBtn" title="Ouvir novamente" aria-label="Ouvir resposta novamente">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                    <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
-                  </svg>
-                </button>
-                <button type="button" class="mini-icon-btn" id="clearResponseBtn" title="Fechar conversa" aria-label="Fechar conversa">
-                  <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <div class="response-body">
-              <p class="user-transcript hidden" id="userTranscript"></p>
-              <p class="assistant-reply" id="assistantReply"></p>
-            </div>
-          </div>
-
-          <!-- Entrada de Texto Alternativa estilo iOS Spotlight -->
-          <form class="text-fallback" id="textForm" autocomplete="off">
-            <input
-              type="text"
-              id="textInput"
-              class="text-input"
-              placeholder="Pergunte algo sobre sua agenda ou clima..."
-              aria-label="Digite uma pergunta para o assistente"
-            />
-            <button type="submit" class="send-btn" id="sendBtn" aria-label="Enviar pergunta">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 19V5"></path>
-                <path d="m5 12 7-7 7 7"></path>
-              </svg>
-            </button>
-          </form>
-        </div>
-      </section>
-
-      <!-- Coluna Direita: Widgets iOS (Clima + Google Agenda) -->
-      <section class="widgets-column" aria-label="Widgets de Clima e Agenda">
-        <!-- Widget 1: Clima estilo Apple iOS Weather -->
+        <!-- Widget de Clima atual bem ao lado direito do Relógio e Data -->
         <article class="ios-widget weather-widget" id="weatherWidget" data-weather-theme="clear-night">
           <div class="weather-top-row">
             <button type="button" class="weather-city-btn" id="weatherCityBtn" title="Trocar cidade do clima">
@@ -294,25 +217,28 @@
 
           <div class="weather-hourly-strip" id="weatherHourlyStrip" aria-label="Previsão por hora"></div>
         </article>
+      </section>
 
-        <!-- Widget 2: Google Agenda estilo Apple iOS Calendar -->
+      <!-- ÁREA INFERIOR: Duas colunas lado a lado na mesma altura -->
+      <section class="bottom-columns-grid" aria-label="Agenda e Assistente de Voz">
+        <!-- COLUNA ESQUERDA: Agenda estilo calendário (Hoje + Próximos dias da semana) -->
         <article class="ios-widget agenda-card" id="agendaWidget">
           <div class="card-header">
             <div class="card-title-group">
               <div class="ios-cal-icon" aria-hidden="true">
                 <span class="ios-cal-month" id="iosCalMonth">NOV</span>
-                <span class="ios-cal-day" id="iosCalDay">23</span>
+                <span class="ios-cal-day" id="iosCalDay">24</span>
               </div>
               <div>
-                <h2 class="card-title" id="agendaCardTitle">Agenda</h2>
-                <span class="card-subtitle-small" id="agendaHeaderSub">Hoje · toque para expandir</span>
+                <h2 class="card-title" id="agendaCardTitle">Agenda da Semana</h2>
+                <span class="card-subtitle-small" id="agendaHeaderSub">Hoje e próximos 7 dias · toque para expandir</span>
               </div>
               <span class="event-count-badge hidden" id="eventCountBadge">0</span>
             </div>
             <div class="card-actions">
               <div class="segmented-control" id="agendaRangeSwitch" role="tablist" aria-label="Visualização da agenda">
-                <button type="button" class="seg-btn active" data-range="day" role="tab" aria-selected="true">Dia</button>
-                <button type="button" class="seg-btn" data-range="week" role="tab" aria-selected="false">Semana</button>
+                <button type="button" class="seg-btn" data-range="day" role="tab" aria-selected="false">Hoje</button>
+                <button type="button" class="seg-btn active" data-range="week" role="tab" aria-selected="true">Semana</button>
               </div>
               <button type="button" class="mini-icon-btn hidden" id="refreshCalendarBtn" title="Atualizar eventos" aria-label="Atualizar eventos">
                 <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -337,7 +263,7 @@
           <!-- Estado: Não Conectado -->
           <div class="agenda-connect-state" id="agendaConnectState">
             <p class="empty-title">Conecte sua Google Agenda</p>
-            <p class="empty-subtitle">Veja os próximos eventos de hoje e da semana e peça ao Gemini para criar compromissos por voz.</p>
+            <p class="empty-subtitle">Veja seus compromissos de hoje e da semana e pergunte sobre seu dia ao Gemini por voz.</p>
 
             <button type="button" class="google-connect-btn" id="connectCalendarBtn">
               <svg class="google-g" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
@@ -361,10 +287,10 @@
             <div class="skeleton-item"></div>
           </div>
 
-          <!-- Estado: Lista de Eventos -->
-          <ul class="events-list hidden" id="eventsList" aria-label="Próximos eventos"></ul>
+          <!-- Estado: Lista Estruturada de Eventos estilo Calendário -->
+          <ul class="events-list hidden" id="eventsList" aria-label="Compromissos da agenda"></ul>
 
-          <!-- Estado: Sem Eventos Restantes Hoje -->
+          <!-- Estado: Sem Eventos -->
           <div class="agenda-empty-today hidden" id="agendaEmptyToday">
             <div class="check-circle" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
@@ -372,12 +298,145 @@
               </svg>
             </div>
             <p class="empty-title">Agenda livre</p>
-            <p class="empty-subtitle">Nenhum compromisso restante neste período.</p>
+            <p class="empty-subtitle">Nenhum compromisso encontrado para este período.</p>
           </div>
 
           <div class="agenda-footer hidden" id="agendaFooter">
             <span id="agendaSyncMeta">Sincronizado agora</span>
           </div>
+        </article>
+
+        <!-- COLUNA DIREITA: Assistente, Histórico de Mensagens, Controles de Fala e Texto -->
+        <article class="ios-widget assistant-panel" id="assistantPanel" aria-label="Assistente de Voz e Mensagens">
+          <div class="assistant-panel-header">
+            <div class="response-tag" id="responseTag">
+              <span class="gemini-spark" aria-hidden="true">✦</span>
+              <span>Assistente</span>
+              <span class="model-chip" id="responseModelLabel">Gemini 3.5 Flash Lite</span>
+            </div>
+            <div class="response-actions">
+              <button
+                type="button"
+                class="stop-voice-btn"
+                id="stopVoiceBtn"
+                title="Silenciar ou interromper a leitura em voz alta"
+                aria-label="Parar leitura em voz alta"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <line x1="23" y1="9" x2="17" y2="15"></line>
+                  <line x1="17" y1="9" x2="23" y2="15"></line>
+                </svg>
+                <span>Parar fala</span>
+              </button>
+              <button type="button" class="mini-icon-btn" id="replayVoiceBtn" title="Ouvir última resposta novamente" aria-label="Ouvir última resposta novamente">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+                </svg>
+              </button>
+              <button type="button" class="mini-icon-btn" id="clearResponseBtn" title="Limpar conversa" aria-label="Limpar conversa">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Histórico de Mensagens (Perguntas e Respostas) -->
+          <div class="chat-messages" id="chatMessages" aria-live="polite">
+            <div class="chat-empty-state" id="chatEmptyState">
+              <p class="chat-empty-title">Como posso ajudar hoje?</p>
+              <p class="chat-empty-sub">Toque no microfone, clique em <strong>Resumo</strong> ou digite sua pergunta abaixo.</p>
+            </div>
+          </div>
+
+          <!-- Status da Voz / Erros em Tempo Real -->
+          <div class="assistant-status-bar">
+            <span class="assistant-status-dot" aria-hidden="true"></span>
+            <p class="assistant-status" id="assistantStatus" role="status" aria-live="polite">Pronto para ouvir</p>
+          </div>
+
+          <!-- Controles de Voz: [Resumo] (Microfone) [Conversa Contínua] -->
+          <div class="voice-controls-row">
+            <button
+              type="button"
+              class="voice-side-btn summary-btn"
+              id="summaryBtn"
+              title="Gerar e ouvir resumo do tempo, compromissos de hoje e eventos da semana"
+            >
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="4"></circle>
+                <path d="M12 2v2"></path>
+                <path d="M12 20v2"></path>
+                <path d="m4.93 4.93 1.41 1.41"></path>
+                <path d="m17.66 17.66 1.41 1.41"></path>
+                <path d="M2 12h2"></path>
+                <path d="M20 12h2"></path>
+              </svg>
+              <span>Resumo</span>
+            </button>
+
+            <div class="mic-stage">
+              <div class="siri-halo" aria-hidden="true"></div>
+              <div class="mic-ring ring-1" aria-hidden="true"></div>
+              <div class="mic-ring ring-2" aria-hidden="true"></div>
+              <button
+                type="button"
+                class="mic-btn"
+                id="micBtn"
+                aria-label="Falar com o assistente Gemini"
+              >
+                <span class="mic-core" aria-hidden="true"></span>
+                <!-- Ícone Microfone (Idle) -->
+                <svg class="mic-icon icon-mic" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="12" x2="12" y1="19" y2="22"></line>
+                </svg>
+
+                <!-- Ondas Animadas (Listening / Speaking) -->
+                <div class="voice-bars" aria-hidden="true">
+                  <span></span><span></span><span></span><span></span><span></span>
+                </div>
+
+                <!-- Spinner (Thinking) -->
+                <div class="thinking-spinner" aria-hidden="true"></div>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              class="voice-side-btn continuous-toggle-btn"
+              id="continuousModeBtn"
+              aria-pressed="false"
+              title="Ativar ou desativar modo de Conversa Contínua"
+            >
+              <span class="continuous-label">Contínua</span>
+              <span class="mini-switch" aria-hidden="true">
+                <span class="mini-switch-knob"></span>
+              </span>
+            </button>
+          </div>
+
+          <!-- Entrada de Texto estilo iOS Spotlight -->
+          <form class="text-fallback" id="textForm" autocomplete="off">
+            <input
+              type="text"
+              id="textInput"
+              class="text-input"
+              placeholder="Pergunte sobre sua agenda, clima ou diga bom dia..."
+              aria-label="Digite uma pergunta para o assistente"
+            />
+            <button type="submit" class="send-btn" id="sendBtn" aria-label="Enviar pergunta">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 19V5"></path>
+                <path d="m5 12 7-7 7 7"></path>
+              </svg>
+            </button>
+          </form>
         </article>
       </section>
     </main>
@@ -417,13 +476,14 @@
               </svg>
             </button>
           </div>
-          <span class="field-hint">Usada na API REST do modelo <code>gemini-3.5-flash-lite</code> (ou outro selecionado abaixo).</span>
+          <span class="field-hint">Usada na API REST do Gemini com fallback automático entre modelos.</span>
         </div>
 
         <div class="field-group">
           <label for="geminiModelSelect">Modelo Gemini</label>
           <select id="geminiModelSelect">
             <option value="gemini-3.5-flash-lite">Gemini 3.5 Flash Lite (Recomendado — Mais rápido)</option>
+            <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
             <option value="gemini-3.8-flash">Gemini 3.8 Flash (Mais inteligente)</option>
             <option value="gemini-flash-latest">Gemini Flash Latest (Automático)</option>
             <option value="gemini-4-hydrogen">Gemini 4 Hydrogen</option>
@@ -439,7 +499,7 @@
             spellcheck="false"
             autocomplete="off"
           />
-          <span class="field-hint">Usado pelo Google Identity Services para leitura e criação de eventos na Google Agenda.</span>
+          <span class="field-hint">Usado pelo Google Identity Services para leitura e criação na Google Agenda.</span>
         </div>
 
         <div class="field-group">
@@ -459,8 +519,8 @@
           <div class="field-group">
             <label for="voiceEngineSelect">Tipo de Voz</label>
             <select id="voiceEngineSelect">
-              <option value="gemini">Gemini Neural (Natural — Recomendado)</option>
-              <option value="browser">Voz do Navegador (Local / Offline)</option>
+              <option value="gemini">Gemini Neural (Natural + Fallback Local)</option>
+              <option value="browser">Voz do Navegador (Instantânea / Offline)</option>
             </select>
           </div>
 
@@ -481,7 +541,7 @@
 
         <div class="prefs-grid">
           <div class="field-group">
-            <label for="voiceSelect">Voz Local (Fallback / Offline)</label>
+            <label for="voiceSelect">Voz Local (pt-BR)</label>
             <select id="voiceSelect">
               <option value="">Automática (melhor voz pt-BR)</option>
             </select>

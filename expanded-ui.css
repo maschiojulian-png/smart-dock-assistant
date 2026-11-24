@@ -1,239 +1,496 @@
 /* ==========================================================================
-   Layout Adaptativo de Voz + Relógio Dinâmico + Modais Expandidos (Clima & Agenda)
+   Smart Dock — Novo Layout Lado a Lado (Topo: Relógio+Data | Clima,
+   Base: Agenda | Assistente) + Controles de Voz + Modais Expandidos
    ========================================================================== */
 
-/* ---- Transições suaves de Relógio & Microfone (Idle grande -> Conversando compacto no topo) ---- */
-.hero-column {
-  transition: justify-content var(--transition-smooth), gap var(--transition-smooth);
-}
-
-.clock-block,
-.clock-time,
-.clock-seconds,
-.mic-stage,
-.mic-btn {
-  transition:
-    font-size var(--transition-smooth),
-    width var(--transition-smooth),
-    height var(--transition-smooth),
-    transform var(--transition-smooth),
-    opacity var(--transition-fast),
-    margin var(--transition-smooth);
-}
-
-/* Estado ocioso (não clicando no microfone): números do relógio MAIORES e imponentes */
-.clock-time {
-  font-size: clamp(5.8rem, 13vw, 10.2rem);
-}
-
-/* Estado conversando (ouvindo / pensando / falando / com resposta aberta):
-   Relógio diminui suavemente e microfone sobe mais para cima, sem cortar o texto embaixo! */
-body.voice-active .hero-column {
-  justify-content: flex-start;
-  gap: 10px;
-  padding-top: 2px;
-}
-
-body.voice-active .clock-block {
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-body.voice-active .date-pill {
-  padding: 3px 10px;
-  font-size: 0.74rem;
-}
-
-body.voice-active .clock-display {
-  margin-top: 2px;
-}
-
-body.voice-active .clock-time {
-  font-size: clamp(2.6rem, 5.2vw, 3.8rem);
-}
-
-body.voice-active .clock-seconds {
-  font-size: clamp(0.95rem, 1.8vw, 1.35rem);
-}
-
-body.voice-active .next-event-chip {
-  display: none;
-}
-
-body.voice-active .assistant-block {
+/* ---- Grade Principal em 2 Faixas (Sem rolagem desnecessária) ---- */
+.dock-grid {
   flex: 1;
   min-height: 0;
-  gap: 10px;
-  justify-content: flex-start;
-}
-
-body.voice-active .mic-stage {
-  width: 96px;
-  height: 96px;
-  flex-shrink: 0;
-}
-
-body.voice-active .mic-btn {
-  width: 76px;
-  height: 76px;
-}
-
-/* Cartão de resposta limpo: flexível para NUNCA cortar na parte inferior */
-.response-card {
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  gap: 14px;
 }
 
-body.voice-active .response-card {
+/* ---- TOPO: Relógio & Data à Esquerda + Clima bem ao lado Direito ---- */
+.top-hero-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.95fr);
+  gap: 16px;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+
+.clock-hero-card {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 18px 26px;
+  background: linear-gradient(155deg, rgba(24, 27, 36, 0.84) 0%, rgba(14, 16, 22, 0.9) 100%);
+  border: 1px solid var(--border-glass);
+}
+
+.clock-hero-card .clock-block {
+  align-items: flex-start;
+  text-align: left;
+  width: 100%;
+  gap: 8px;
+}
+
+/* Fonte grande e legível à distância para Data e Relógio */
+.clock-hero-card .date-pill {
+  padding: 6px 15px;
+  font-size: clamp(0.95rem, 1.35vw, 1.16rem);
+  font-weight: 600;
+  gap: 9px;
+  background: rgba(255, 255, 255, 0.075);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.clock-hero-card .date-display {
+  color: rgba(241, 245, 249, 0.9);
+  font-weight: 500;
+}
+
+.clock-hero-card .clock-display {
+  justify-content: flex-start;
+  margin-top: 2px;
+  line-height: 0.92;
+}
+
+.clock-hero-card .clock-time {
+  font-size: clamp(4.6rem, 7.8vw, 7.2rem);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+}
+
+.clock-hero-card .clock-seconds {
+  font-size: clamp(1.5rem, 2.5vw, 2.25rem);
+}
+
+.clock-hero-card .clock-ampm {
+  font-size: clamp(0.92rem, 1.3vw, 1.15rem);
+}
+
+.clock-hero-card .next-event-chip {
+  margin-top: 4px;
+  font-size: 0.86rem;
+  padding: 6px 13px;
+}
+
+/* Widget de Clima no topo direito, alinhado à altura do Relógio */
+.top-hero-row .weather-widget {
+  justify-content: space-between;
+  padding: 14px 18px;
+  gap: 8px;
+}
+
+.top-hero-row .weather-temp {
+  font-size: clamp(2.6rem, 4.1vw, 3.4rem);
+}
+
+.top-hero-row .weather-condition {
+  font-size: 1rem;
+}
+
+.top-hero-row .weather-highlow {
+  font-size: 0.82rem;
+}
+
+.top-hero-row .weather-hero-icon {
+  width: 56px;
+  height: 56px;
+}
+
+/* ---- ÁREA INFERIOR: Duas Colunas Lado a Lado com Mesma Altura ---- */
+.bottom-columns-grid {
   flex: 1;
-  min-height: 84px;
-  max-height: 100%;
-  overflow: hidden;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
 }
 
-.response-body {
+/* Coluna Esquerda: Agenda estilo calendário */
+.bottom-columns-grid .agenda-card {
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Coluna Direita: Painel do Assistente, Fala e Mensagens */
+.assistant-panel {
+  height: 100%;
+  min-height: 0;
+  padding: 16px 18px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.assistant-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.model-chip {
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: capitalize;
+  color: var(--label-tertiary);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  margin-left: 4px;
+}
+
+/* Botão rápido de silenciar / parar leitura em voz alta */
+.stop-voice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 30px;
+  padding: 0 11px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--label-secondary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.stop-voice-btn:hover {
+  background: rgba(220, 92, 92, 0.2);
+  border-color: rgba(220, 92, 92, 0.45);
+  color: #ffb3ae;
+}
+
+body[data-state="speaking"] .stop-voice-btn {
+  background: rgba(220, 92, 92, 0.22);
+  border-color: rgba(220, 92, 92, 0.55);
+  color: #ffc2be;
+  box-shadow: 0 0 14px rgba(220, 92, 92, 0.24);
+  animation: gentlePulse 1.6s ease-in-out infinite;
+}
+
+/* ---- Histórico de Mensagens (Perguntas & Respostas) ---- */
+.chat-messages {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-right: 2px;
+  gap: 9px;
+  padding: 4px 4px 4px 0;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
 
-.response-body .assistant-reply {
-  max-height: none;
-  overflow: visible;
+.chat-empty-state {
+  margin: auto;
+  text-align: center;
+  padding: 18px 16px;
+  max-width: 340px;
 }
 
-.text-fallback {
+.chat-empty-title {
+  margin: 0 0 6px;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--label-primary);
+}
+
+.chat-empty-sub {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--label-tertiary);
+}
+
+.chat-empty-sub strong {
+  color: var(--label-secondary);
+}
+
+.chat-bubble {
+  max-width: 92%;
+  padding: 10px 13px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: fadeSlideUp 180ms var(--ease-ios);
+  word-break: break-word;
+}
+
+.chat-bubble.user {
+  align-self: flex-end;
+  background: rgba(76, 139, 245, 0.18);
+  border: 1px solid rgba(76, 139, 245, 0.34);
+  border-bottom-right-radius: 5px;
+}
+
+.chat-bubble.assistant {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-bottom-left-radius: 5px;
+}
+
+.chat-bubble.assistant.is-error {
+  background: rgba(220, 92, 92, 0.12);
+  border-color: rgba(220, 92, 92, 0.35);
+}
+
+.chat-bubble-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.67rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--label-tertiary);
+}
+
+.chat-bubble.user .chat-bubble-meta {
+  color: rgba(186, 214, 255, 0.78);
+}
+
+.chat-bubble-text {
+  margin: 0;
+  font-size: 0.9rem;
+  line-height: 1.48;
+  color: var(--label-primary);
+  white-space: pre-wrap;
+}
+
+/* ---- Barra de Status da Voz & Erros ---- */
+.assistant-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 20px;
   flex-shrink: 0;
 }
 
-/* ---- Celular Retrato (Portrait) ---- */
-@media (max-width: 919px) and (orientation: portrait) {
-  .clock-time {
-    font-size: clamp(5.2rem, 24vw, 7.2rem);
-  }
-
-  .hero-column {
-    gap: 14px;
-    padding-bottom: 4px;
-  }
-
-  body.voice-active .clock-time {
-    font-size: clamp(2.4rem, 11.5vw, 3.3rem);
-  }
-
-  body.voice-active .mic-stage {
-    width: 88px;
-    height: 88px;
-  }
-
-  body.voice-active .mic-btn {
-    width: 70px;
-    height: 70px;
-  }
-
-  body.voice-active .response-card {
-    flex: 0 1 auto;
-    max-height: 40dvh;
-  }
-
-  .app-shell {
-    padding-bottom: calc(28px + var(--safe-bottom));
-  }
+.assistant-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(148, 163, 184, 0.55);
+  flex-shrink: 0;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-/* ---- Celular Horizontal (Landscape StandBy — max-height: 540px) ---- */
-@media (orientation: landscape) and (max-height: 540px) {
-  /* Ocioso: relógio bem maior */
-  .clock-time {
-    font-size: clamp(3.8rem, 22vh, 5.4rem);
-  }
+body[data-state="listening"] .assistant-status-dot {
+  background: var(--ios-blue);
+  box-shadow: 0 0 10px rgba(76, 139, 245, 0.85);
+}
 
-  .hero-column {
-    justify-content: center;
-    gap: 8px;
-  }
+body[data-state="thinking"] .assistant-status-dot {
+  background: var(--ios-orange);
+  box-shadow: 0 0 10px rgba(212, 163, 89, 0.75);
+}
 
-  .assistant-block {
-    gap: 8px;
-  }
+body[data-state="speaking"] .assistant-status-dot {
+  background: var(--ios-green);
+  box-shadow: 0 0 10px rgba(52, 199, 123, 0.85);
+}
 
-  /* Quando começa a falar: hora bem compacta no topo, microfone sobe,
-     e o cartão de texto ocupa o espaço restante sem NUNCA cortar embaixo! */
-  body.voice-active .hero-column {
-    justify-content: flex-start;
-    gap: 4px;
-    padding: 0;
-  }
+.assistant-status {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--label-secondary);
+  min-height: 1.2em;
+  text-align: center;
+}
 
-  body.voice-active .date-pill {
-    display: none;
-  }
+.assistant-status.is-error {
+  color: #fca5a5;
+}
 
-  body.voice-active .clock-display {
-    margin-top: 0;
-  }
+/* ---- Linha de Controles de Fala: [Resumo] (Microfone) [Contínua] ---- */
+.voice-controls-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  padding: 2px 0;
+}
 
-  body.voice-active .clock-time {
-    font-size: clamp(1.7rem, 9.5vh, 2.35rem);
-  }
+.voice-side-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 38px;
+  padding: 0 13px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.065);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  color: var(--label-secondary);
+  font-size: 0.79rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
 
-  body.voice-active .clock-seconds {
-    font-size: 0.82rem;
-  }
+.voice-side-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--label-primary);
+  transform: translateY(-1px);
+}
 
-  body.voice-active .assistant-block {
-    flex: 1;
-    min-height: 0;
-    gap: 5px;
-    width: 100%;
-  }
+.voice-side-btn:active {
+  transform: scale(0.96);
+}
 
-  body.voice-active .mic-stage {
-    width: 54px;
-    height: 54px;
-  }
+.summary-btn {
+  justify-self: end;
+  color: #e2e8f0;
+}
 
-  body.voice-active .mic-btn {
-    width: 44px;
-    height: 44px;
-  }
+.summary-btn svg {
+  color: #ffd60a;
+  flex-shrink: 0;
+}
 
-  body.voice-active .mic-icon {
-    width: 19px;
-    height: 19px;
-  }
+.continuous-toggle-btn {
+  justify-self: start;
+  padding-right: 9px;
+}
 
-  body.voice-active .response-card {
-    flex: 1;
-    min-height: 58px;
-    padding: 6px 10px;
-  }
+.mini-switch {
+  position: relative;
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background var(--transition-fast);
+  flex-shrink: 0;
+}
 
-  body.voice-active .response-header {
-    margin-bottom: 3px;
-  }
+.mini-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #e2e8f0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
 
-  body.voice-active .user-transcript {
-    font-size: 0.72rem;
-    margin: 0;
-  }
+.continuous-toggle-btn[aria-pressed="true"] {
+  background: rgba(52, 199, 123, 0.16);
+  border-color: rgba(52, 199, 123, 0.45);
+  color: #a7f3d0;
+}
 
-  body.voice-active .assistant-reply {
-    font-size: 0.8rem;
-    line-height: 1.38;
-  }
+.continuous-toggle-btn[aria-pressed="true"] .mini-switch {
+  background: var(--ios-green);
+}
 
-  .seg-btn {
-    padding: 2px 7px;
-    font-size: 0.62rem;
-  }
+.continuous-toggle-btn[aria-pressed="true"] .mini-switch-knob {
+  transform: translateX(13px);
+  background: #ffffff;
+}
+
+/* Microfone equilibrado no centro dos controles */
+.voice-controls-row .mic-stage {
+  justify-self: center;
+  width: 82px;
+  height: 82px;
+  flex-shrink: 0;
+}
+
+.voice-controls-row .siri-halo {
+  inset: 5px;
+  filter: blur(14px);
+}
+
+.voice-controls-row .mic-btn {
+  width: 64px;
+  height: 64px;
+}
+
+.voice-controls-row .mic-icon {
+  width: 26px;
+  height: 26px;
+}
+
+.voice-controls-row .voice-bars {
+  height: 24px;
+  gap: 4px;
+}
+
+.voice-controls-row .thinking-spinner {
+  width: 26px;
+  height: 26px;
+}
+
+.assistant-panel .text-fallback {
+  flex-shrink: 0;
+}
+
+/* ---- Agenda Estilo Calendário Estruturado ---- */
+.calendar-day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px 4px;
+  margin-top: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  list-style: none;
+}
+
+.calendar-day-header:first-child {
+  margin-top: 0;
+  padding-top: 2px;
+}
+
+.calendar-day-header-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #8cc0ff;
+}
+
+.calendar-day-header.is-today .calendar-day-header-left {
+  color: #6ee7b7;
+}
+
+.calendar-day-badge {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--label-tertiary);
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* ---- Widgets clicáveis para abrir em tela grande ---- */
@@ -247,7 +504,7 @@ body.voice-active .response-card {
   border-color: rgba(255, 255, 255, 0.16);
 }
 
-/* Segmented Control estilo Apple iOS (Dia / Semana) */
+/* Segmented Control estilo Apple iOS (Hoje / Semana) */
 .segmented-control {
   display: inline-flex;
   align-items: center;
@@ -278,24 +535,275 @@ body.voice-active .response-card {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28);
 }
 
-/* Divisória de dia na visualização de Semana (widget compacto) */
-.event-day-divider {
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--ios-blue);
-  padding: 4px 4px 1px;
-  margin-top: 2px;
-  list-style: none;
+/* ==========================================================================
+   Responsividade: Desktop Sem Scroll, Smart Dock Horizontal & Celular Retrato
+   ========================================================================== */
+
+/* Desktop: tela cheia sem rolagem na página */
+@media (min-width: 900px) and (min-height: 541px) {
+  html,
+  body {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-shell {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    gap: 12px;
+    padding-top: calc(12px + var(--safe-top));
+    padding-bottom: calc(14px + var(--safe-bottom));
+  }
 }
 
-.event-day-divider:first-child {
-  margin-top: 0;
-  padding-top: 0;
+/* Celular / Tablet em Modo Retrato */
+@media (max-width: 899px) and (orientation: portrait) {
+  html,
+  body {
+    height: auto;
+    overflow-y: auto;
+  }
+
+  .app-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(24px + var(--safe-bottom));
+    gap: 12px;
+  }
+
+  .top-hero-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .clock-hero-card {
+    padding: 16px 18px;
+  }
+
+  .clock-hero-card .clock-block {
+    align-items: center;
+    text-align: center;
+  }
+
+  .clock-hero-card .clock-display {
+    justify-content: center;
+  }
+
+  .clock-hero-card .clock-time {
+    font-size: clamp(4.2rem, 19vw, 5.8rem);
+  }
+
+  .bottom-columns-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .assistant-panel {
+    order: -1;
+    min-height: 360px;
+    max-height: 58dvh;
+  }
+
+  .bottom-columns-grid .agenda-card {
+    min-height: 260px;
+    max-height: 48dvh;
+  }
+
+  .voice-controls-row {
+    gap: 8px;
+  }
+
+  .voice-side-btn {
+    height: 36px;
+    padding: 0 10px;
+    font-size: 0.74rem;
+  }
+
+  .stop-voice-btn span {
+    display: none;
+  }
 }
 
-/* Modais Expandidos (Clima e Agenda em Tela Grande) */
+/* Celular / Smart Dock na Horizontal (Landscape compacto <= 540px de altura) */
+@media (orientation: landscape) and (max-height: 540px) {
+  html,
+  body {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .app-shell {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
+    gap: 6px;
+    padding-top: calc(6px + var(--safe-top));
+    padding-right: calc(10px + var(--safe-right));
+    padding-bottom: calc(6px + var(--safe-bottom));
+    padding-left: calc(10px + var(--safe-left));
+  }
+
+  .dock-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .top-hero-row {
+    grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.95fr);
+    gap: 8px;
+  }
+
+  .clock-hero-card {
+    padding: 8px 14px;
+    border-radius: 18px;
+  }
+
+  .clock-hero-card .clock-block {
+    gap: 2px;
+  }
+
+  .clock-hero-card .date-pill {
+    padding: 2px 9px;
+    font-size: 0.72rem;
+    gap: 5px;
+  }
+
+  .clock-hero-card .clock-time {
+    font-size: clamp(2.5rem, 11.5vh, 3.6rem);
+  }
+
+  .clock-hero-card .clock-seconds {
+    font-size: clamp(0.9rem, 3.8vh, 1.25rem);
+  }
+
+  .clock-hero-card .next-event-chip {
+    display: none;
+  }
+
+  .top-hero-row .weather-widget {
+    padding: 7px 12px;
+    gap: 4px;
+    border-radius: 18px;
+  }
+
+  .top-hero-row .weather-temp {
+    font-size: 1.85rem;
+  }
+
+  .top-hero-row .weather-condition {
+    font-size: 0.76rem;
+  }
+
+  .top-hero-row .weather-highlow {
+    font-size: 0.66rem;
+  }
+
+  .top-hero-row .weather-hero-icon {
+    width: 34px;
+    height: 34px;
+  }
+
+  .top-hero-row .weather-hourly-strip {
+    display: none;
+  }
+
+  .bottom-columns-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .bottom-columns-grid .agenda-card,
+  .assistant-panel {
+    padding: 8px 11px;
+    border-radius: 18px;
+    gap: 5px;
+  }
+
+  .assistant-panel-header {
+    padding-bottom: 5px;
+  }
+
+  .model-chip {
+    display: none;
+  }
+
+  .stop-voice-btn {
+    height: 24px;
+    padding: 0 8px;
+    font-size: 0.66rem;
+  }
+
+  .chat-bubble {
+    padding: 6px 9px;
+    border-radius: 12px;
+  }
+
+  .chat-bubble-text {
+    font-size: 0.76rem;
+    line-height: 1.35;
+  }
+
+  .assistant-status-bar {
+    min-height: 14px;
+  }
+
+  .assistant-status {
+    font-size: 0.66rem;
+  }
+
+  .voice-controls-row {
+    gap: 8px;
+    padding: 0;
+  }
+
+  .voice-side-btn {
+    height: 28px;
+    padding: 0 8px;
+    font-size: 0.68rem;
+    gap: 5px;
+  }
+
+  .mini-switch {
+    width: 24px;
+    height: 14px;
+  }
+
+  .mini-switch-knob {
+    width: 10px;
+    height: 10px;
+  }
+
+  .continuous-toggle-btn[aria-pressed="true"] .mini-switch-knob {
+    transform: translateX(10px);
+  }
+
+  .voice-controls-row .mic-stage {
+    width: 52px;
+    height: 52px;
+  }
+
+  .voice-controls-row .mic-btn {
+    width: 42px;
+    height: 42px;
+  }
+
+  .voice-controls-row .mic-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .seg-btn {
+    padding: 2px 7px;
+    font-size: 0.62rem;
+  }
+}
+
+/* ==========================================================================
+   Modais Expandidos (Clima e Agenda em Tela Grande)
+   ========================================================================== */
 .expanded-modal-panel {
   max-width: min(940px, 95vw);
   width: 100%;

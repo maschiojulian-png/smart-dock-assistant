@@ -6,7 +6,7 @@ const ALLOWED_MODELS = new Set([
   'gemini-4-hydrogen',
   'gemini-2.5-flash',
 ]);
-const FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'];
+const FALLBACK_MODELS = ['gemini-3.5-flash-lite', 'gemini-2.5-flash', 'gemini-3.8-flash', 'gemini-flash-latest'];
 const TTS_FALLBACK_MODELS = [
   'gemini-3.8-flash-lite-tts',
   'gemini-3.8-flash-tts',
