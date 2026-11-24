@@ -23,7 +23,7 @@
   const GEMINI_REQUEST_TIMEOUT_MS = 16000;
   const GEMINI_TTS_TIMEOUT_MS = 14000;
   const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
-  const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+  const CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
   const CALENDAR_EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
   const CALENDAR_REFRESH_MS = 5 * 60 * 1000; // 5 minutos
   const WEATHER_REFRESH_MS = 15 * 60 * 1000; // 15 minutos
@@ -42,6 +42,7 @@
     voiceURI: '',
     speechRate: 1.0,
     soundChimes: true,
+    continuousVoice: true,
     geminiModel: DEFAULT_GEMINI_MODEL,
   };
 
@@ -64,8 +65,13 @@
     tokenClientIdUsed: null,
     accessToken: null,
     tokenExpiresAt: 0,
+    hasCalendarWriteScope: false,
+    pendingEventToCreate: null,
     calendarMode: 'disconnected', // 'disconnected' | 'google' | 'demo'
+    agendaRange: 'day', // 'day' | 'week' (widget)
+    modalAgendaRange: 'week', // 'day' | 'week' (modal expandido)
     todayEvents: [],
+    weekEvents: [],
     calendarRefreshTimer: null,
 
     // Voz & Gemini
@@ -73,6 +79,8 @@
     serverGoogleClientId: '',
     recognition: null,
     forceStopListening: null,
+    conversationActive: false,
+    autoListenTimer: null,
     finalTranscript: '',
     lastReply: '',
     chatHistory: [],
@@ -115,6 +123,7 @@
     // Assistente
     micBtn: document.getElementById('micBtn'),
     assistantStatus: document.getElementById('assistantStatus'),
+    fluidModeBtn: document.getElementById('fluidModeBtn'),
     quickPrompts: document.getElementById('quickPrompts'),
     responseCard: document.getElementById('responseCard'),
     responseModelLabel: document.getElementById('responseModelLabel'),
@@ -131,6 +140,7 @@
     weatherCityName: document.getElementById('weatherCityName'),
     weatherGpsBtn: document.getElementById('weatherGpsBtn'),
     refreshWeatherBtn: document.getElementById('refreshWeatherBtn'),
+    expandWeatherBtn: document.getElementById('expandWeatherBtn'),
     weatherCityForm: document.getElementById('weatherCityForm'),
     weatherCityInput: document.getElementById('weatherCityInput'),
     cancelCitySearchBtn: document.getElementById('cancelCitySearchBtn'),
@@ -145,6 +155,11 @@
     weatherHourlyStrip: document.getElementById('weatherHourlyStrip'),
 
     // Agenda
+    agendaWidget: document.getElementById('agendaWidget'),
+    agendaCardTitle: document.getElementById('agendaCardTitle'),
+    agendaHeaderSub: document.getElementById('agendaHeaderSub'),
+    agendaRangeSwitch: document.getElementById('agendaRangeSwitch'),
+    expandAgendaBtn: document.getElementById('expandAgendaBtn'),
     eventCountBadge: document.getElementById('eventCountBadge'),
     refreshCalendarBtn: document.getElementById('refreshCalendarBtn'),
     disconnectCalendarBtn: document.getElementById('disconnectCalendarBtn'),
@@ -156,6 +171,34 @@
     agendaEmptyToday: document.getElementById('agendaEmptyToday'),
     agendaFooter: document.getElementById('agendaFooter'),
     agendaSyncMeta: document.getElementById('agendaSyncMeta'),
+
+    // Modal Expandido: Agenda
+    agendaExpandedModal: document.getElementById('agendaExpandedModal'),
+    modalCalMonth: document.getElementById('modalCalMonth'),
+    modalCalDay: document.getElementById('modalCalDay'),
+    agendaModalTitle: document.getElementById('agendaModalTitle'),
+    agendaModalSubtitle: document.getElementById('agendaModalSubtitle'),
+    modalAgendaRangeSwitch: document.getElementById('modalAgendaRangeSwitch'),
+    toggleNewEventFormBtn: document.getElementById('toggleNewEventFormBtn'),
+    closeAgendaModalBtn: document.getElementById('closeAgendaModalBtn'),
+    newEventForm: document.getElementById('newEventForm'),
+    newEventTitle: document.getElementById('newEventTitle'),
+    newEventLocation: document.getElementById('newEventLocation'),
+    newEventDate: document.getElementById('newEventDate'),
+    newEventStart: document.getElementById('newEventStart'),
+    newEventEnd: document.getElementById('newEventEnd'),
+    cancelNewEventBtn: document.getElementById('cancelNewEventBtn'),
+    submitNewEventBtn: document.getElementById('submitNewEventBtn'),
+    agendaExpandedContent: document.getElementById('agendaExpandedContent'),
+
+    // Modal Expandido: Clima
+    weatherExpandedModal: document.getElementById('weatherExpandedModal'),
+    weatherModalPanel: document.getElementById('weatherModalPanel'),
+    weatherModalTitle: document.getElementById('weatherModalTitle'),
+    weatherModalSubtitle: document.getElementById('weatherModalSubtitle'),
+    modalRefreshWeatherBtn: document.getElementById('modalRefreshWeatherBtn'),
+    closeWeatherModalBtn: document.getElementById('closeWeatherModalBtn'),
+    weatherExpandedContent: document.getElementById('weatherExpandedContent'),
 
     // Modal de Configurações
     settingsModal: document.getElementById('settingsModal'),
@@ -284,6 +327,32 @@
     }, duration);
   }
 
+  function setResponseCardVisible(visible) {
+    el.responseCard.classList.toggle('hidden', !visible);
+    el.body.classList.toggle('has-response', Boolean(visible));
+  }
+
+  function isAnyModalOpen() {
+    return (
+      !el.settingsModal.classList.contains('hidden') ||
+      !el.iosFullscreenModal.classList.contains('hidden') ||
+      !el.agendaExpandedModal.classList.contains('hidden') ||
+      !el.weatherExpandedModal.classList.contains('hidden')
+    );
+  }
+
+  function cancelAutoListenTimer() {
+    if (state.autoListenTimer) {
+      clearTimeout(state.autoListenTimer);
+      state.autoListenTimer = null;
+    }
+  }
+
+  function updateFluidModeUI() {
+    if (!el.fluidModeBtn) return;
+    el.fluidModeBtn.setAttribute('aria-pressed', String(Boolean(state.prefs.continuousVoice)));
+  }
+
   function setAssistantState(newState, statusMessage) {
     state.assistantState = newState;
     el.body.dataset.state = newState;
@@ -294,7 +363,7 @@
         idle: 'Toque no microfone para falar com o Gemini',
         listening: 'Ouvindo... pare de falar para enviar automaticamente',
         thinking: 'Consultando Gemini...',
-        speaking: 'Falando — toque no botão para parar',
+        speaking: 'Falando — toque no microfone para interromper e falar',
       };
       el.assistantStatus.textContent = defaultLabels[newState] || '';
     }
@@ -442,14 +511,19 @@
       .toUpperCase();
     el.iosCalMonth.textContent = shortMonth;
     el.iosCalDay.textContent = String(now.getDate());
+    if (el.modalCalMonth) el.modalCalMonth.textContent = shortMonth;
+    if (el.modalCalDay) el.modalCalDay.textContent = String(now.getDate());
   }
 
   function startClock() {
     updateClock();
     setInterval(updateClock, 500);
     setInterval(() => {
-      if (state.todayEvents.length > 0) {
+      if (state.weekEvents.length > 0 || state.todayEvents.length > 0) {
         renderEventsList();
+        if (!el.agendaExpandedModal.classList.contains('hidden')) {
+          renderAgendaExpandedModal();
+        }
       }
     }, 30000);
   }
@@ -574,6 +648,7 @@
   async function fetchWeather(silent = false) {
     const loc = state.weatherLocation || DEFAULT_WEATHER_LOCATION;
     el.refreshWeatherBtn.classList.add('spinning');
+    if (el.modalRefreshWeatherBtn) el.modalRefreshWeatherBtn.classList.add('spinning');
     el.weatherCityName.textContent = loc.name;
 
     try {
@@ -581,10 +656,10 @@
         latitude: String(loc.latitude),
         longitude: String(loc.longitude),
         current: 'temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m',
-        hourly: 'temperature_2m,weather_code,precipitation_probability,is_day',
-        daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+        hourly: 'temperature_2m,weather_code,precipitation_probability,precipitation,wind_speed_10m,is_day',
+        daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,uv_index_max,sunrise,sunset',
         timezone: 'auto',
-        forecast_days: '2',
+        forecast_days: '7',
       });
 
       const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
@@ -600,24 +675,59 @@
       let startIdx = (data.hourly?.time || []).findIndex((t) => t.startsWith(nowHourPrefix));
       if (startIdx < 0) startIdx = 0;
 
+      const buildHourlySlot = (i, idx) => {
+        if (!data.hourly?.time?.[i]) return null;
+        const timeStr = data.hourly.time[i];
+        const hourLabel = idx === 0 ? 'Agora' : `${timeStr.slice(11, 13)}h`;
+        const code = data.hourly.weather_code[i];
+        const isDaySlot = data.hourly.is_day ? data.hourly.is_day[i] : cur.is_day;
+        const slotVisual = getWeatherVisual(code, isDaySlot);
+        return {
+          label: hourLabel,
+          temp: Math.round(data.hourly.temperature_2m[i]),
+          rainProb: Math.round(data.hourly.precipitation_probability?.[i] ?? 0),
+          precipMm: Number(data.hourly.precipitation?.[i] ?? 0),
+          wind: Math.round(data.hourly.wind_speed_10m?.[i] ?? 0),
+          icon: slotVisual.icon,
+          condition: slotVisual.label,
+        };
+      };
+
       const hourlySlots = [0, 3, 6, 9]
-        .map((offset, idx) => {
-          const i = startIdx + offset;
-          if (!data.hourly?.time?.[i]) return null;
-          const timeStr = data.hourly.time[i];
-          const hourLabel = idx === 0 ? 'Agora' : `${timeStr.slice(11, 13)}h`;
-          const code = data.hourly.weather_code[i];
-          const isDaySlot = data.hourly.is_day ? data.hourly.is_day[i] : cur.is_day;
-          const slotVisual = getWeatherVisual(code, isDaySlot);
-          return {
-            label: hourLabel,
-            temp: Math.round(data.hourly.temperature_2m[i]),
-            rainProb: data.hourly.precipitation_probability?.[i] ?? 0,
-            icon: slotVisual.icon,
-            condition: slotVisual.label,
-          };
-        })
+        .map((offset, idx) => buildHourlySlot(startIdx + offset, idx))
         .filter(Boolean);
+
+      const hourly24 = [];
+      for (let h = 0; h < 24; h++) {
+        const slot = buildHourlySlot(startIdx + h, h);
+        if (slot) hourly24.push(slot);
+      }
+
+      const daily7 = (data.daily?.time || []).slice(0, 7).map((dateStr, idx) => {
+        const d = parseLocalAllDayDate(dateStr);
+        const dayLabel =
+          idx === 0
+            ? 'Hoje'
+            : idx === 1
+              ? 'Amanhã'
+              : new Intl.DateTimeFormat('pt-BR', { weekday: 'short' })
+                  .format(d)
+                  .replace('.', '')
+                  .replace(/^./, (c) => c.toUpperCase());
+        const dVis = getWeatherVisual(data.daily.weather_code?.[idx] ?? 0, 1);
+        return {
+          dateStr,
+          dayLabel,
+          icon: dVis.icon,
+          condition: dVis.label,
+          maxTemp: Math.round(data.daily.temperature_2m_max?.[idx] ?? cur.temperature_2m),
+          minTemp: Math.round(data.daily.temperature_2m_min?.[idx] ?? cur.temperature_2m),
+          rainProb: Math.round(data.daily.precipitation_probability_max?.[idx] ?? 0),
+          uvMax: Math.round(data.daily.uv_index_max?.[idx] ?? 0),
+          sunrise: data.daily.sunrise?.[idx]?.slice(11, 16) || '',
+          sunset: data.daily.sunset?.[idx]?.slice(11, 16) || '',
+        };
+      });
 
       const rainChanceNow =
         data.daily?.precipitation_probability_max?.[0] ??
@@ -633,13 +743,21 @@
         maxTemp: Math.round(data.daily?.temperature_2m_max?.[0] ?? cur.temperature_2m),
         minTemp: Math.round(data.daily?.temperature_2m_min?.[0] ?? cur.temperature_2m),
         rainChance: Math.round(rainChanceNow),
+        uvMax: daily7[0]?.uvMax ?? 0,
+        sunrise: daily7[0]?.sunrise || '',
+        sunset: daily7[0]?.sunset || '',
         condition: visual.label,
         theme: visual.theme,
         icon: visual.icon,
         hourly: hourlySlots,
+        hourly24,
+        daily7,
       };
 
       renderWeatherWidget();
+      if (!el.weatherExpandedModal.classList.contains('hidden')) {
+        renderWeatherExpandedModal();
+      }
     } catch (err) {
       console.warn('Erro ao buscar clima:', err);
       el.weatherCondition.textContent = 'Clima indisponível';
@@ -648,7 +766,249 @@
       }
     } finally {
       el.refreshWeatherBtn.classList.remove('spinning');
+      if (el.modalRefreshWeatherBtn) el.modalRefreshWeatherBtn.classList.remove('spinning');
     }
+  }
+
+  function renderWeatherTempChartSvg(hourly24) {
+    if (!hourly24 || hourly24.length < 2) return '';
+    const W = 420;
+    const H = 160;
+    const padL = 22;
+    const padR = 22;
+    const padT = 26;
+    const padB = 26;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+
+    const temps = hourly24.map((h) => h.temp);
+    const minT = Math.min(...temps);
+    const maxT = Math.max(...temps);
+    const span = Math.max(2, maxT - minT);
+
+    const points = hourly24.map((h, i) => {
+      const x = padL + (i / (hourly24.length - 1)) * plotW;
+      const y = padT + (1 - (h.temp - minT) / span) * plotH;
+      return { x, y, ...h, idx: i };
+    });
+
+    const linePath = points
+      .map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+      .join(' ');
+    const areaPath = `${linePath} L${points[points.length - 1].x.toFixed(1)},${(H - padB).toFixed(1)} L${points[0].x.toFixed(1)},${(H - padB).toFixed(1)} Z`;
+
+    const labelIndices = [0, 3, 6, 9, 12, 15, 18, 21];
+    const markers = labelIndices
+      .filter((i) => points[i])
+      .map((i) => {
+        const p = points[i];
+        return `
+          <line x1="${p.x.toFixed(1)}" y1="${padT}" x2="${p.x.toFixed(1)}" y2="${H - padB}" stroke="rgba(255,255,255,0.06)" stroke-width="1" />
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3.6" fill="#ffd60a" stroke="#12141a" stroke-width="1.5" />
+          <text x="${p.x.toFixed(1)}" y="${(p.y - 9).toFixed(1)}" text-anchor="middle" fill="#f5f7fa" font-size="11" font-weight="600">${p.temp}°</text>
+          <text x="${p.x.toFixed(1)}" y="${H - 7}" text-anchor="middle" fill="rgba(226,232,240,0.62)" font-size="10">${escapeHtml(p.label)}</text>
+        `;
+      })
+      .join('');
+
+    return `
+      <svg class="weather-svg-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de temperatura nas próximas 24 horas">
+        <defs>
+          <linearGradient id="tempAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#ffd60a" stop-opacity="0.34" />
+            <stop offset="100%" stop-color="#4c8bf5" stop-opacity="0.02" />
+          </linearGradient>
+          <linearGradient id="tempLineGrad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#64d2ff" />
+            <stop offset="50%" stop-color="#ffd60a" />
+            <stop offset="100%" stop-color="#ff9f0a" />
+          </linearGradient>
+        </defs>
+        <path d="${areaPath}" fill="url(#tempAreaGrad)" />
+        <path d="${linePath}" fill="none" stroke="url(#tempLineGrad)" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" />
+        ${markers}
+      </svg>
+    `;
+  }
+
+  function renderWeatherRainChartSvg(hourly24) {
+    if (!hourly24 || !hourly24.length) return '';
+    const W = 420;
+    const H = 160;
+    const padL = 16;
+    const padR = 16;
+    const padT = 24;
+    const padB = 26;
+    const plotW = W - padL - padR;
+    const plotH = H - padT - padB;
+
+    const samples = hourly24.filter((_, idx) => idx % 2 === 0).slice(0, 12);
+    const step = plotW / samples.length;
+    const barW = Math.max(12, step * 0.56);
+
+    const bars = samples
+      .map((s, idx) => {
+        const pct = Math.min(100, Math.max(0, s.rainProb || 0));
+        const barH = Math.max(pct > 0 ? 6 : 2, (pct / 100) * plotH);
+        const cx = padL + step * idx + step / 2;
+        const x = cx - barW / 2;
+        const y = H - padB - barH;
+        return `
+          <rect x="${x.toFixed(1)}" y="${padT}" width="${barW.toFixed(1)}" height="${plotH}" rx="5" fill="rgba(255,255,255,0.04)" />
+          <rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="5" fill="${pct > 0 ? 'url(#rainBarGrad)' : 'rgba(100,210,255,0.22)'}" />
+          ${pct > 0 ? `<text x="${cx.toFixed(1)}" y="${(y - 6).toFixed(1)}" text-anchor="middle" fill="#8be0ff" font-size="9.5" font-weight="600">${pct}%</text>` : ''}
+          ${idx % 2 === 0 ? `<text x="${cx.toFixed(1)}" y="${H - 7}" text-anchor="middle" fill="rgba(226,232,240,0.62)" font-size="10">${escapeHtml(s.label)}</text>` : ''}
+        `;
+      })
+      .join('');
+
+    return `
+      <svg class="weather-svg-chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de chance de chuva nas próximas 24 horas">
+        <defs>
+          <linearGradient id="rainBarGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#64d2ff" />
+            <stop offset="100%" stop-color="#2563eb" />
+          </linearGradient>
+        </defs>
+        ${bars}
+      </svg>
+    `;
+  }
+
+  function renderWeatherExpandedModal() {
+    const w = state.weatherData;
+    if (!w) {
+      el.weatherExpandedContent.innerHTML = '<p class="empty-subtitle">Carregando dados detalhados do clima...</p>';
+      return;
+    }
+
+    el.weatherModalPanel.dataset.weatherTheme = w.theme;
+    el.weatherModalTitle.textContent = w.city;
+    el.weatherModalSubtitle.textContent = `${w.condition} · Máx ${w.maxTemp}° / Mín ${w.minTemp}°`;
+
+    const hourly24 = w.hourly24 || w.hourly || [];
+    const daily7 = w.daily7 || [];
+    const maxRain24 = hourly24.reduce((m, h) => Math.max(m, h.rainProb || 0), 0);
+    const weekMin = daily7.length ? Math.min(...daily7.map((d) => d.minTemp)) : w.minTemp;
+    const weekMax = daily7.length ? Math.max(...daily7.map((d) => d.maxTemp)) : w.maxTemp;
+    const weekSpan = Math.max(1, weekMax - weekMin);
+
+    const hourly24Html = hourly24
+      .map(
+        (slot) => `
+          <div class="weather-24h-item">
+            <span class="hourly-time">${escapeHtml(slot.label)}</span>
+            <span class="hourly-icon">${renderWeatherSvg(slot.icon, 24)}</span>
+            <span class="weather-24h-rain">${slot.rainProb > 0 ? `${slot.rainProb}%` : ''}</span>
+            <span class="hourly-temp">${slot.temp}°</span>
+          </div>
+        `
+      )
+      .join('');
+
+    const daily7Html = daily7
+      .map((d) => {
+        const leftPct = ((d.minTemp - weekMin) / weekSpan) * 100;
+        const widthPct = Math.max(8, ((d.maxTemp - d.minTemp) / weekSpan) * 100);
+        return `
+          <div class="weather-7d-row">
+            <span class="weather-7d-day">${escapeHtml(d.dayLabel)}</span>
+            <span class="hourly-icon">${renderWeatherSvg(d.icon, 24)}</span>
+            <span class="weather-7d-rain">${d.rainProb > 0 ? `${d.rainProb}%` : '—'}</span>
+            <span class="weather-7d-min">${d.minTemp}°</span>
+            <div class="weather-7d-bar-track">
+              <div class="weather-7d-bar-fill" style="left:${leftPct.toFixed(1)}%;width:${widthPct.toFixed(1)}%;"></div>
+            </div>
+            <span class="weather-7d-max">${d.maxTemp}°</span>
+          </div>
+        `;
+      })
+      .join('');
+
+    el.weatherExpandedContent.innerHTML = `
+      <div class="weather-exp-hero">
+        <div class="weather-exp-hero-left">
+          <div class="weather-hero-icon" style="width:68px;height:68px;">${renderWeatherSvg(w.icon, 68)}</div>
+          <div>
+            <div class="weather-exp-temp">${w.temp}°</div>
+            <div class="weather-exp-cond">${escapeHtml(w.condition)}</div>
+            <div class="weather-exp-range">Máxima ${w.maxTemp}° · Mínima ${w.minTemp}° · Sensação ${w.feelsLike}°</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="weather-exp-metrics">
+        <div class="weather-exp-metric-card">
+          <span class="weather-exp-metric-label">Sensação</span>
+          <span class="weather-exp-metric-val">${w.feelsLike}°</span>
+        </div>
+        <div class="weather-exp-metric-card">
+          <span class="weather-exp-metric-label">Umidade</span>
+          <span class="weather-exp-metric-val">${w.humidity}%</span>
+        </div>
+        <div class="weather-exp-metric-card">
+          <span class="weather-exp-metric-label">Chuva (Hoje)</span>
+          <span class="weather-exp-metric-val">${w.rainChance}%</span>
+        </div>
+        <div class="weather-exp-metric-card">
+          <span class="weather-exp-metric-label">Vento</span>
+          <span class="weather-exp-metric-val">${w.wind} km/h</span>
+        </div>
+        <div class="weather-exp-metric-card">
+          <span class="weather-exp-metric-label">Índice UV Máx</span>
+          <span class="weather-exp-metric-val">${w.uvMax ?? 0}</span>
+        </div>
+        ${w.sunrise && w.sunset ? `
+        <div class="weather-exp-metric-card">
+          <span class="weather-exp-metric-label">Sol</span>
+          <span class="weather-exp-metric-val">${escapeHtml(w.sunrise)} · ${escapeHtml(w.sunset)}</span>
+        </div>` : ''}
+      </div>
+
+      <div class="weather-charts-grid">
+        <div class="weather-chart-card">
+          <h3 class="weather-chart-title">
+            <span>Temperatura por Hora (24h)</span>
+            <span class="weather-chart-sub">Curva térmica</span>
+          </h3>
+          ${renderWeatherTempChartSvg(hourly24)}
+        </div>
+
+        <div class="weather-chart-card">
+          <h3 class="weather-chart-title">
+            <span>Chance de Chuva (24h)</span>
+            <span class="weather-chart-sub">Pico: ${maxRain24}%</span>
+          </h3>
+          ${renderWeatherRainChartSvg(hourly24)}
+        </div>
+      </div>
+
+      <div class="weather-chart-card">
+        <h3 class="weather-chart-title">
+          <span>Previsão Hora a Hora (Próximas 24h)</span>
+          <span class="weather-chart-sub">Deslize para o lado</span>
+        </h3>
+        <div class="weather-24h-scroll">${hourly24Html}</div>
+      </div>
+
+      ${daily7.length ? `
+      <div class="weather-chart-card">
+        <h3 class="weather-chart-title">
+          <span>Previsão dos Próximos 7 Dias</span>
+          <span class="weather-chart-sub">Mínima ↔ Máxima</span>
+        </h3>
+        <div class="weather-7d-list">${daily7Html}</div>
+      </div>` : ''}
+    `;
+  }
+
+  function openWeatherExpandedModal() {
+    renderWeatherExpandedModal();
+    el.weatherExpandedModal.classList.remove('hidden');
+  }
+
+  function closeWeatherExpandedModal() {
+    el.weatherExpandedModal.classList.add('hidden');
   }
 
   function renderWeatherWidget() {
@@ -907,16 +1267,17 @@
   }
 
   // --------------------------------------------------------------------------
-  // 2. Integração com Google Agenda (Google Identity Services OAuth)
+  // 2. Integração com Google Agenda (Google Identity Services OAuth + Escrita)
   // --------------------------------------------------------------------------
-  function saveSessionToken(token, expiresInSeconds) {
+  function saveSessionToken(token, expiresInSeconds, hasWriteScope = true) {
     const expiresAt = Date.now() + Math.max(60, (expiresInSeconds || 3500) - 60) * 1000;
     state.accessToken = token;
     state.tokenExpiresAt = expiresAt;
+    state.hasCalendarWriteScope = Boolean(hasWriteScope);
     try {
       sessionStorage.setItem(
         STORAGE_KEYS.SESSION_TOKEN,
-        JSON.stringify({ token, expiresAt })
+        JSON.stringify({ token, expiresAt, hasWriteScope: state.hasCalendarWriteScope })
       );
     } catch {
       // Ignora
@@ -931,6 +1292,7 @@
       if (parsed.token && parsed.expiresAt && Date.now() < parsed.expiresAt) {
         state.accessToken = parsed.token;
         state.tokenExpiresAt = parsed.expiresAt;
+        state.hasCalendarWriteScope = Boolean(parsed.hasWriteScope);
         return true;
       }
       sessionStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
@@ -943,6 +1305,7 @@
   function clearSessionToken() {
     state.accessToken = null;
     state.tokenExpiresAt = 0;
+    state.hasCalendarWriteScope = false;
     try {
       sessionStorage.removeItem(STORAGE_KEYS.SESSION_TOKEN);
     } catch {
@@ -967,9 +1330,19 @@
           showToast(`Erro OAuth Google: ${tokenResponse.error}`, 'error', 4500);
           return;
         }
-        saveSessionToken(tokenResponse.access_token, Number(tokenResponse.expires_in));
+        saveSessionToken(tokenResponse.access_token, Number(tokenResponse.expires_in), true);
         state.calendarMode = 'google';
-        showToast('Google Agenda conectada!', 'success', 2500);
+        showToast('Google Agenda conectada (leitura e criação)!', 'success', 2600);
+
+        if (state.pendingEventToCreate) {
+          const pending = state.pendingEventToCreate;
+          state.pendingEventToCreate = null;
+          const res = await createCalendarEvent(pending);
+          if (res.ok) {
+            showToast(`Evento "${pending.title}" criado na Google Agenda!`, 'success', 3500);
+          }
+        }
+
         await fetchTodayEvents();
         startCalendarAutoRefresh();
       },
@@ -986,7 +1359,7 @@
     return state.tokenClient;
   }
 
-  function connectGoogleCalendar() {
+  function connectGoogleCalendar(forceConsent = false) {
     const clientId = getGoogleClientId();
     if (!clientId) {
       showToast('Cole seu Google OAuth Client ID nos Ajustes primeiro.', 'error', 4000);
@@ -1001,7 +1374,8 @@
 
     try {
       const client = ensureGoogleTokenClient(clientId);
-      client.requestAccessToken({ prompt: state.accessToken ? '' : 'consent' });
+      const prompt = forceConsent || !state.accessToken || !state.hasCalendarWriteScope ? 'consent' : '';
+      client.requestAccessToken({ prompt });
     } catch (err) {
       showToast(err.message, 'error', 4500);
     }
@@ -1020,9 +1394,55 @@
     el.agendaFooter.classList.toggle('hidden', !isConnected);
   }
 
+  function getLocalDateKey(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  function formatDayHeading(date) {
+    const todayKey = getLocalDateKey(new Date());
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowKey = getLocalDateKey(tomorrow);
+    const key = getLocalDateKey(date);
+
+    const formatted = new Intl.DateTimeFormat('pt-BR', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    })
+      .format(date)
+      .replace(/\./g, '');
+    const cap = formatted.charAt(0).toUpperCase() + formatted.slice(1);
+
+    if (key === todayKey) return `Hoje · ${cap}`;
+    if (key === tomorrowKey) return `Amanhã · ${cap}`;
+    return cap;
+  }
+
+  function syncTodayFromWeekEvents() {
+    const now = new Date();
+    const todayKey = getLocalDateKey(now);
+    state.todayEvents = state.weekEvents.filter((evt) => {
+      const startKey = getLocalDateKey(evt.startDate);
+      if (evt.isAllDay) return startKey === todayKey;
+      return startKey === todayKey && evt.endDate >= now;
+    });
+  }
+
   async function fetchTodayEvents() {
     if (state.calendarMode === 'demo') {
-      loadDemoEvents(true);
+      if (!state.weekEvents.length) {
+        loadDemoEvents(true);
+      } else {
+        syncTodayFromWeekEvents();
+        renderEventsList();
+        if (!el.agendaExpandedModal.classList.contains('hidden')) {
+          renderAgendaExpandedModal();
+        }
+      }
       return;
     }
 
@@ -1035,16 +1455,17 @@
     }
 
     el.refreshCalendarBtn.classList.add('spinning');
-    if (state.todayEvents.length === 0) {
+    if (state.weekEvents.length === 0) {
       setAgendaView('loading');
     }
 
     try {
       const now = new Date();
-      const endOfToday = new Date(
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      const endOfWeek = new Date(
         now.getFullYear(),
         now.getMonth(),
-        now.getDate(),
+        now.getDate() + 6,
         23,
         59,
         59,
@@ -1052,11 +1473,11 @@
       );
 
       const params = new URLSearchParams({
-        timeMin: now.toISOString(),
-        timeMax: endOfToday.toISOString(),
+        timeMin: startOfToday.toISOString(),
+        timeMax: endOfWeek.toISOString(),
         singleEvents: 'true',
         orderBy: 'startTime',
-        maxResults: '5',
+        maxResults: '50',
       });
 
       const response = await fetch(`${CALENDAR_EVENTS_URL}?${params.toString()}`, {
@@ -1079,8 +1500,16 @@
       }
 
       const data = await response.json();
-      state.todayEvents = (data.items || []).slice(0, 5).map(normalizeCalendarEvent);
+      state.weekEvents = (data.items || [])
+        .map(normalizeCalendarEvent)
+        .filter((evt) => evt.isAllDay || evt.endDate >= now)
+        .sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+
+      syncTodayFromWeekEvents();
       renderEventsList();
+      if (!el.agendaExpandedModal.classList.contains('hidden')) {
+        renderAgendaExpandedModal();
+      }
 
       const timeStr = new Intl.DateTimeFormat('pt-BR', {
         hour: '2-digit',
@@ -1090,11 +1519,107 @@
     } catch (err) {
       console.error('Erro ao buscar eventos:', err);
       showToast(`Erro na Google Agenda: ${err.message}`, 'error', 4500);
-      if (state.todayEvents.length === 0) {
+      if (state.weekEvents.length === 0) {
         setAgendaView('connect');
       }
     } finally {
       el.refreshCalendarBtn.classList.remove('spinning');
+    }
+  }
+
+  function parseLocalDateTimeInput(val) {
+    if (!val) return null;
+    if (val instanceof Date) return Number.isNaN(val.getTime()) ? null : val;
+    const str = String(val).trim();
+    // Se vier no formato YYYY-MM-DD (dia todo)
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      return parseLocalAllDayDate(str);
+    }
+    const d = new Date(str);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  async function createCalendarEvent(evtSpec) {
+    const title = String(evtSpec?.title || evtSpec?.summary || '').trim();
+    if (!title) return { ok: false, reason: 'invalid', message: 'Título do evento ausente.' };
+
+    const isAllDay = Boolean(evtSpec?.allDay);
+    const startDate = parseLocalDateTimeInput(evtSpec?.start);
+    if (!startDate) return { ok: false, reason: 'invalid', message: 'Data ou horário do evento inválido.' };
+
+    let endDate = parseLocalDateTimeInput(evtSpec?.end);
+    if (!endDate || endDate <= startDate) {
+      endDate = new Date(startDate.getTime() + (isAllDay ? 86400000 : 60 * 60000));
+    }
+
+    const location = String(evtSpec?.location || '').trim();
+    const description = String(evtSpec?.description || '').trim();
+
+    if (state.calendarMode === 'demo') {
+      const demoEvent = {
+        id: `demo-custom-${Date.now()}`,
+        title,
+        isAllDay,
+        startDate,
+        endDate,
+        location,
+        description,
+      };
+      state.weekEvents.push(demoEvent);
+      state.weekEvents.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+      syncTodayFromWeekEvents();
+      renderEventsList();
+      if (!el.agendaExpandedModal.classList.contains('hidden')) {
+        renderAgendaExpandedModal();
+      }
+      return { ok: true, mode: 'demo', event: demoEvent };
+    }
+
+    if (state.calendarMode !== 'google' || !state.accessToken || Date.now() >= state.tokenExpiresAt) {
+      return { ok: false, reason: 'disconnected', message: 'Conecte sua Google Agenda primeiro.' };
+    }
+
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
+    const body = {
+      summary: title,
+      location: location || undefined,
+      description: description || undefined,
+      start: isAllDay
+        ? { date: getLocalDateKey(startDate) }
+        : { dateTime: startDate.toISOString(), timeZone },
+      end: isAllDay
+        ? { date: getLocalDateKey(endDate) }
+        : { dateTime: endDate.toISOString(), timeZone },
+    };
+
+    try {
+      const response = await fetch(CALENDAR_EVENTS_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${state.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        state.pendingEventToCreate = { title, start: startDate, end: endDate, location, description, allDay: isAllDay };
+        showToast('Autorize a permissão para criar eventos na Google Agenda.', 'info', 4500);
+        connectGoogleCalendar(true);
+        return { ok: false, reason: 'needs_auth', message: 'Requer permissão de escrita na Google Agenda.' };
+      }
+
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        throw new Error(errBody.error?.message || `Erro HTTP ${response.status}`);
+      }
+
+      const created = await response.json();
+      await fetchTodayEvents();
+      return { ok: true, mode: 'google', event: normalizeCalendarEvent(created) };
+    } catch (err) {
+      console.error('Erro ao criar evento na Google Agenda:', err);
+      return { ok: false, reason: 'error', message: err.message };
     }
   }
 
@@ -1131,60 +1656,194 @@
     }).format(date);
   }
 
+  function renderEventItemHtml(evt, now) {
+    const isNow = !evt.isAllDay && now >= evt.startDate && now <= evt.endDate;
+    const minsUntil = !evt.isAllDay
+      ? Math.round((evt.startDate.getTime() - now.getTime()) / 60000)
+      : null;
+
+    let badgeHtml = '';
+    if (isNow) {
+      badgeHtml = '<span class="event-status-tag now">Agora</span>';
+    } else if (minsUntil !== null && minsUntil > 0 && minsUntil <= 60) {
+      badgeHtml = `<span class="event-status-tag soon">em ${minsUntil} min</span>`;
+    }
+
+    const startLabel = evt.isAllDay ? 'Dia todo' : formatTimeShort(evt.startDate);
+    const endLabel = evt.isAllDay ? '' : formatTimeShort(evt.endDate);
+
+    return `
+      <li class="event-item ${isNow ? 'is-now' : ''}">
+        <span class="event-accent-bar" aria-hidden="true"></span>
+        <div class="event-time-col">
+          <span class="event-start">${escapeHtml(startLabel)}</span>
+          ${endLabel ? `<span class="event-end">${escapeHtml(endLabel)}</span>` : ''}
+        </div>
+        <div class="event-info-col">
+          <div class="event-title-row">
+            <span class="event-title" title="${escapeHtml(evt.title)}">${escapeHtml(evt.title)}</span>
+            ${badgeHtml}
+          </div>
+          ${evt.location ? `<span class="event-location" title="${escapeHtml(evt.location)}">${escapeHtml(evt.location)}</span>` : ''}
+        </div>
+      </li>
+    `;
+  }
+
+  function updateSegmentedControlUI(container, activeRange) {
+    if (!container) return;
+    container.querySelectorAll('.seg-btn').forEach((btn) => {
+      const isActive = btn.dataset.range === activeRange;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-selected', String(isActive));
+    });
+  }
+
+  function setWidgetAgendaRange(range) {
+    state.agendaRange = range === 'week' ? 'week' : 'day';
+    updateSegmentedControlUI(el.agendaRangeSwitch, state.agendaRange);
+    if (el.agendaCardTitle) {
+      el.agendaCardTitle.textContent = state.agendaRange === 'week' ? 'Agenda da Semana' : 'Agenda de Hoje';
+    }
+    if (el.agendaHeaderSub) {
+      el.agendaHeaderSub.textContent =
+        state.agendaRange === 'week' ? 'Próximos 7 dias · toque para expandir' : 'Hoje · toque para expandir';
+    }
+    if (state.calendarMode !== 'disconnected') {
+      renderEventsList();
+    }
+  }
+
   function renderEventsList() {
     const now = new Date();
-    const events = state.todayEvents;
+    const isWeek = state.agendaRange === 'week';
+    const events = isWeek ? state.weekEvents : state.todayEvents;
     el.eventCountBadge.textContent = String(events.length);
+
+    // Chip de próximo evento no relógio sempre usa o próximo compromisso mais próximo
+    const nextEvt = state.todayEvents[0] || state.weekEvents[0];
+    if (nextEvt) {
+      const isNextToday = getLocalDateKey(nextEvt.startDate) === getLocalDateKey(now);
+      const when = nextEvt.isAllDay
+        ? isNextToday
+          ? 'hoje'
+          : formatDayHeading(nextEvt.startDate)
+        : isNextToday
+          ? `às ${formatTimeShort(nextEvt.startDate)}`
+          : `${formatDayHeading(nextEvt.startDate).split(' · ')[0]} às ${formatTimeShort(nextEvt.startDate)}`;
+      el.nextEventChipText.textContent = `Próximo: ${nextEvt.title} (${when})`;
+      el.nextEventChip.classList.remove('hidden');
+    } else {
+      el.nextEventChip.classList.add('hidden');
+    }
 
     if (!events.length) {
       setAgendaView('empty');
-      el.nextEventChip.classList.add('hidden');
       return;
     }
 
     setAgendaView('list');
-    el.eventsList.innerHTML = events
-      .map((evt) => {
-        const isNow = !evt.isAllDay && now >= evt.startDate && now <= evt.endDate;
-        const minsUntil = !evt.isAllDay
-          ? Math.round((evt.startDate.getTime() - now.getTime()) / 60000)
-          : null;
 
-        let badgeHtml = '';
-        if (isNow) {
-          badgeHtml = '<span class="event-status-tag now">Agora</span>';
-        } else if (minsUntil !== null && minsUntil > 0 && minsUntil <= 60) {
-          badgeHtml = `<span class="event-status-tag soon">em ${minsUntil} min</span>`;
-        }
-
-        const startLabel = evt.isAllDay ? 'Dia todo' : formatTimeShort(evt.startDate);
-        const endLabel = evt.isAllDay ? '' : formatTimeShort(evt.endDate);
-
-        return `
-          <li class="event-item ${isNow ? 'is-now' : ''}">
-            <span class="event-accent-bar" aria-hidden="true"></span>
-            <div class="event-time-col">
-              <span class="event-start">${escapeHtml(startLabel)}</span>
-              ${endLabel ? `<span class="event-end">${escapeHtml(endLabel)}</span>` : ''}
-            </div>
-            <div class="event-info-col">
-              <div class="event-title-row">
-                <span class="event-title" title="${escapeHtml(evt.title)}">${escapeHtml(evt.title)}</span>
-                ${badgeHtml}
-              </div>
-              ${evt.location ? `<span class="event-location" title="${escapeHtml(evt.location)}">${escapeHtml(evt.location)}</span>` : ''}
-            </div>
-          </li>
-        `;
-      })
-      .join('');
-
-    const nextEvt = events[0];
-    if (nextEvt) {
-      const when = nextEvt.isAllDay ? 'hoje' : `às ${formatTimeShort(nextEvt.startDate)}`;
-      el.nextEventChipText.textContent = `Próximo: ${nextEvt.title} (${when})`;
-      el.nextEventChip.classList.remove('hidden');
+    if (!isWeek) {
+      el.eventsList.innerHTML = events.map((evt) => renderEventItemHtml(evt, now)).join('');
+      return;
     }
+
+    // Modo Semana: agrupa eventos por dia com divisórias
+    let lastDayKey = '';
+    const chunks = [];
+    for (const evt of events) {
+      const dayKey = getLocalDateKey(evt.startDate);
+      if (dayKey !== lastDayKey) {
+        lastDayKey = dayKey;
+        chunks.push(`<li class="event-day-divider">${escapeHtml(formatDayHeading(evt.startDate))}</li>`);
+      }
+      chunks.push(renderEventItemHtml(evt, now));
+    }
+    el.eventsList.innerHTML = chunks.join('');
+  }
+
+  function renderAgendaExpandedModal() {
+    const now = new Date();
+    const isWeek = state.modalAgendaRange === 'week';
+    updateSegmentedControlUI(el.modalAgendaRangeSwitch, state.modalAgendaRange);
+    el.agendaModalTitle.textContent = isWeek ? 'Agenda da Semana' : 'Agenda de Hoje';
+
+    if (state.calendarMode === 'disconnected') {
+      el.agendaModalSubtitle.textContent = 'Conecte sua Google Agenda ou carregue a demonstração';
+      el.agendaExpandedContent.innerHTML = `
+        <div class="agenda-connect-state" style="padding: 28px 12px;">
+          <p class="empty-title">Google Agenda não conectada</p>
+          <p class="empty-subtitle">Conecte sua conta Google para ver toda a sua semana e criar eventos por voz com o Gemini.</p>
+          <button type="button" class="google-connect-btn" id="modalConnectCalBtn">Conectar Google Agenda</button>
+          <button type="button" class="demo-link-btn" id="modalLoadDemoBtn">Visualizar semana de exemplo</button>
+        </div>
+      `;
+      document.getElementById('modalConnectCalBtn')?.addEventListener('click', () => connectGoogleCalendar(false));
+      document.getElementById('modalLoadDemoBtn')?.addEventListener('click', () => {
+        loadDemoEvents(false);
+        renderAgendaExpandedModal();
+      });
+      return;
+    }
+
+    el.agendaModalSubtitle.textContent =
+      state.calendarMode === 'demo'
+        ? 'Modo demonstração · peça ao Gemini para agendar ou clique em + Novo evento'
+        : 'Google Agenda · peça ao Gemini para agendar ou clique em + Novo evento';
+
+    if (!isWeek) {
+      if (!state.todayEvents.length) {
+        el.agendaExpandedContent.innerHTML = '<p class="empty-subtitle" style="text-align:center;padding:24px;">Nenhum compromisso restante para hoje.</p>';
+        return;
+      }
+      el.agendaExpandedContent.innerHTML = `<ul class="events-list">${state.todayEvents.map((e) => renderEventItemHtml(e, now)).join('')}</ul>`;
+      return;
+    }
+
+    // Visualização completa dos próximos 7 dias em cards
+    const daysHtml = [];
+    for (let offset = 0; offset < 7; offset++) {
+      const dayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+      const dayKey = getLocalDateKey(dayDate);
+      const dayEvents = state.weekEvents.filter((e) => getLocalDateKey(e.startDate) === dayKey);
+      const isToday = offset === 0;
+
+      daysHtml.push(`
+        <div class="week-day-card ${isToday ? 'is-today' : ''}">
+          <div class="week-day-head">
+            <span class="week-day-name">${escapeHtml(formatDayHeading(dayDate))}</span>
+            <span class="week-day-count">${dayEvents.length} ${dayEvents.length === 1 ? 'evento' : 'eventos'}</span>
+          </div>
+          ${
+            dayEvents.length
+              ? `<ul class="events-list">${dayEvents.map((e) => renderEventItemHtml(e, now)).join('')}</ul>`
+              : '<p class="week-day-empty">Dia livre</p>'
+          }
+        </div>
+      `);
+    }
+
+    el.agendaExpandedContent.innerHTML = `<div class="week-days-grid">${daysHtml.join('')}</div>`;
+  }
+
+  function openAgendaExpandedModal(initialRange = 'week') {
+    state.modalAgendaRange = initialRange;
+    el.newEventForm.classList.add('hidden');
+    // Pré-preenche data de hoje no formulário rápido
+    const now = new Date();
+    el.newEventDate.value = getLocalDateKey(now);
+    const nextHour = (now.getHours() + 1) % 24;
+    const endHour = (nextHour + 1) % 24;
+    el.newEventStart.value = `${String(nextHour).padStart(2, '0')}:00`;
+    el.newEventEnd.value = `${String(endHour).padStart(2, '0')}:00`;
+
+    renderAgendaExpandedModal();
+    el.agendaExpandedModal.classList.remove('hidden');
+  }
+
+  function closeAgendaExpandedModal() {
+    el.agendaExpandedModal.classList.add('hidden');
   }
 
   function startCalendarAutoRefresh() {
@@ -1215,8 +1874,12 @@
     clearSessionToken();
     state.calendarMode = 'disconnected';
     state.todayEvents = [];
+    state.weekEvents = [];
     el.nextEventChip.classList.add('hidden');
     setAgendaView('connect');
+    if (!el.agendaExpandedModal.classList.contains('hidden')) {
+      renderAgendaExpandedModal();
+    }
     showToast('Agenda desconectada.', 'info', 2200);
   }
 
@@ -1236,40 +1899,71 @@
       };
     };
 
+    const mkDay = (dayOffset, hour, min, durationMin, title, location) => {
+      const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, hour, min, 0, 0);
+      const endDate = new Date(startDate.getTime() + durationMin * 60000);
+      return {
+        id: `demo-d${dayOffset}-${hour}${min}`,
+        title,
+        isAllDay: false,
+        startDate,
+        endDate,
+        location,
+        description: '',
+      };
+    };
+
     state.calendarMode = 'demo';
-    state.todayEvents = [
+    state.weekEvents = [
       mk(-10, 40, 'Daily de Produto & Design', 'Google Meet'),
       mk(45, 60, 'Revisão de Arquitetura PWA', 'Sala Vidro 2'),
       mk(135, 45, 'Almoço com Mariana', 'Bistrô Paulista'),
       mk(220, 60, 'Call de Alinhamento com Cliente', 'Zoom'),
-      mk(330, 50, 'Treino / Academia', 'Smart Fit'),
-    ];
+      mkDay(1, 9, 30, 60, 'Planejamento da Sprint', 'Google Meet'),
+      mkDay(1, 15, 0, 45, 'Dentista', 'Clínica Jardins'),
+      mkDay(2, 11, 0, 60, 'Apresentação de Resultados', 'Auditório'),
+      mkDay(3, 18, 30, 60, 'Treino / Academia', 'Smart Fit'),
+      mkDay(4, 14, 0, 90, 'Workshop de Design iOS', 'Online'),
+      mkDay(5, 12, 30, 90, 'Almoço em Família', 'Restaurante'),
+    ].sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+
+    syncTodayFromWeekEvents();
     renderEventsList();
-    el.agendaSyncMeta.textContent = 'Modo demonstração • 5 eventos fictícios de hoje';
+    el.agendaSyncMeta.textContent = 'Modo demonstração • Eventos da semana';
     if (!silent) {
-      showToast('Agenda de exemplo carregada!', 'success', 2600);
+      showToast('Agenda da semana de exemplo carregada!', 'success', 2600);
     }
   }
 
   function buildCalendarContextForGemini() {
-    if (state.calendarMode === 'disconnected') {
-      return 'A Google Agenda ainda não está conectada pelo usuário.';
+    const now = new Date();
+    const weekRefLines = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+      const wk = new Intl.DateTimeFormat('pt-BR', { weekday: 'long' }).format(d);
+      weekRefLines.push(`- ${getLocalDateKey(d)} (${wk}${i === 0 ? ' — HOJE' : i === 1 ? ' — AMANHÃ' : ''})`);
     }
-    if (!state.todayEvents.length) {
-      return 'A Google Agenda está conectada, mas não há mais eventos agendados para hoje.';
+    const calendarRef = `Calendário de referência (próximos 7 dias):\n${weekRefLines.join('\n')}`;
+
+    if (state.calendarMode === 'disconnected') {
+      return `${calendarRef}\n\nA Google Agenda ainda não está conectada pelo usuário.`;
+    }
+    if (!state.weekEvents.length) {
+      return `${calendarRef}\n\nA agenda está conectada, mas não há eventos agendados para os próximos 7 dias.`;
     }
     const header =
       state.calendarMode === 'demo'
-        ? 'Eventos de hoje (modo demonstração):'
-        : 'Próximos eventos de hoje na Google Agenda do usuário:';
-    const lines = state.todayEvents.map((evt, idx) => {
+        ? 'Eventos dos próximos 7 dias (modo demonstração):'
+        : 'Eventos dos próximos 7 dias na Google Agenda do usuário:';
+    const lines = state.weekEvents.slice(0, 25).map((evt, idx) => {
+      const dateTag = `${getLocalDateKey(evt.startDate)} (${formatDayHeading(evt.startDate)})`;
       const timeRange = evt.isAllDay
         ? 'Dia todo'
         : `${formatTimeShort(evt.startDate)} às ${formatTimeShort(evt.endDate)}`;
       const loc = evt.location ? ` | Local: ${evt.location}` : '';
-      return `${idx + 1}. ${timeRange} — ${evt.title}${loc}`;
+      return `${idx + 1}. [${dateTag}] ${timeRange} — ${evt.title}${loc}`;
     });
-    return `${header}\n${lines.join('\n')}`;
+    return `${calendarRef}\n\n${header}\n${lines.join('\n')}`;
   }
 
   // --------------------------------------------------------------------------
@@ -1447,14 +2141,41 @@
     }
   }
 
-  function stopSpeaking() {
+  function stopSpeaking(keepConversation = false) {
     state.speechQueueId += 1;
+    cancelAutoListenTimer();
+    if (!keepConversation) {
+      state.conversationActive = false;
+    }
     cleanupActiveAudio();
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
     if (state.assistantState === 'speaking') {
       setAssistantState('idle');
+    }
+  }
+
+  function handleSpeechFinished(queueId) {
+    if (queueId !== state.speechQueueId) return;
+    setAssistantState('idle');
+
+    // Conversa fluida: se o usuário falou por voz e o modo contínuo está ativo,
+    // reabre o microfone automaticamente sem precisar tocar ou fechar a mensagem anterior!
+    if (state.conversationActive && state.prefs.continuousVoice && !isAnyModalOpen()) {
+      cancelAutoListenTimer();
+      el.assistantStatus.textContent = 'Pronto para continuar ouvindo...';
+      state.autoListenTimer = setTimeout(() => {
+        state.autoListenTimer = null;
+        if (
+          state.assistantState === 'idle' &&
+          state.conversationActive &&
+          state.prefs.continuousVoice &&
+          !isAnyModalOpen()
+        ) {
+          startVoiceRecognition(true);
+        }
+      }, 650);
     }
   }
 
@@ -1594,9 +2315,7 @@
             if (state.activeAudioSource === source) {
               state.activeAudioSource = null;
             }
-            if (queueId === state.speechQueueId) {
-              setAssistantState('idle');
-            }
+            handleSpeechFinished(queueId);
           };
 
           source.start(0);
@@ -1622,9 +2341,7 @@
 
       htmlAudio.onended = () => {
         cleanupActiveAudio();
-        if (queueId === state.speechQueueId) {
-          setAssistantState('idle');
-        }
+        handleSpeechFinished(queueId);
       };
       htmlAudio.onerror = () => {
         cleanupActiveAudio();
@@ -1644,13 +2361,13 @@
 
   function speakWithBrowserSynthesis(cleanText, queueId) {
     if (!('speechSynthesis' in window)) {
-      if (queueId === state.speechQueueId) setAssistantState('idle');
+      handleSpeechFinished(queueId);
       return;
     }
 
     const chunks = splitIntoSpeechChunks(cleanText);
     if (!chunks.length) {
-      if (queueId === state.speechQueueId) setAssistantState('idle');
+      handleSpeechFinished(queueId);
       return;
     }
 
@@ -1663,7 +2380,7 @@
     const speakNext = (index) => {
       if (queueId !== state.speechQueueId) return;
       if (index >= chunks.length) {
-        setAssistantState('idle');
+        handleSpeechFinished(queueId);
         return;
       }
 
@@ -1734,12 +2451,9 @@
     speakWithBrowserSynthesis(cleanText, queueId);
   }
 
-  function startVoiceRecognition() {
-    // Se estiver falando, tocar no botão interrompe a fala
-    if (state.assistantState === 'speaking') {
-      stopSpeaking();
-      return;
-    }
+  function startVoiceRecognition(isAutoFollowUp = false) {
+    const autoFollowUp = isAutoFollowUp === true;
+    cancelAutoListenTimer();
 
     // Se já estiver ouvindo, encerra imediatamente e envia o que foi captado
     if (state.assistantState === 'listening') {
@@ -1759,12 +2473,18 @@
 
     // Se estiver consultando o Gemini, cancela a requisição
     if (state.assistantState === 'thinking' && state.currentAbortController) {
+      state.conversationActive = false;
       state.currentAbortController._userCancelled = true;
       state.currentAbortController.abort();
       state.currentAbortController = null;
       setAssistantState('idle');
       showToast('Consulta cancelada.', 'info', 2000);
       return;
+    }
+
+    // Se estiver falando e o usuário tocar no microfone, interrompe a fala e já começa a ouvir imediatamente!
+    if (state.assistantState === 'speaking') {
+      stopSpeaking(true);
     }
 
     if (!hasGeminiAccess()) {
@@ -1780,9 +2500,14 @@
       return;
     }
 
+    // Ativa conversa fluida quando iniciada por voz (se preferência estiver ligada)
+    if (!autoFollowUp) {
+      state.conversationActive = Boolean(state.prefs.continuousVoice);
+    }
+
     // Para qualquer síntese de fala ativa sem tocar chime/AudioContext durante a abertura do microfone
     // (evita conflito de sessão de áudio no iOS Safari, Bluetooth e Windows)
-    stopSpeaking();
+    stopSpeaking(true);
     if (!state.audioUnlocked) {
       state.audioUnlocked = true;
       el.audioUnlockPill.classList.add('unlocked');
@@ -1803,7 +2528,7 @@
 
     const SILENCE_AUTO_STOP_MS = 1600; // Para automaticamente 1,6s após você terminar de falar
     const SPEECH_END_GRACE_MS = 450;   // Encerra rápido quando o navegador detecta fim de fala
-    const INITIAL_NO_SPEECH_MS = 8500; // Tempo máximo aguardando você começar a falar
+    const INITIAL_NO_SPEECH_MS = autoFollowUp ? 6500 : 8500;
     const STOP_FALLBACK_MS = 750;      // Fallback caso o Safari não dispare onend após stop()
 
     const recognition = new SpeechRec();
@@ -1839,11 +2564,17 @@
 
       const question = (latestTranscript || state.finalTranscript).trim();
       if (!skipGemini && question) {
-        askGemini(question);
-      } else if (state.assistantState === 'listening') {
-        setAssistantState('idle');
-        if (!state.lastReply) {
-          el.responseCard.classList.add('hidden');
+        askGemini(question, { fromVoice: true });
+      } else {
+        // Se ficou em silêncio no modo contínuo, apenas encerra a conversa suavemente
+        if (autoFollowUp) {
+          state.conversationActive = false;
+        }
+        if (state.assistantState === 'listening') {
+          setAssistantState('idle');
+          if (!state.lastReply) {
+            setResponseCardVisible(false);
+          }
         }
       }
     };
@@ -1868,16 +2599,29 @@
     state.forceStopListening = triggerAutoStop;
 
     recognition.onstart = () => {
-      setAssistantState('listening');
-      el.responseCard.classList.remove('hidden');
+      setAssistantState(
+        'listening',
+        autoFollowUp
+          ? 'Pode continuar falando... (silêncio para encerrar)'
+          : 'Ouvindo... pare de falar para enviar automaticamente'
+      );
+      setResponseCardVisible(true);
       el.userTranscript.classList.remove('hidden');
-      el.userTranscript.textContent = 'Ouvindo... pode falar';
-      el.assistantReply.textContent = '';
+      if (!autoFollowUp) {
+        el.userTranscript.textContent = 'Ouvindo... pode falar';
+        el.assistantReply.textContent = '';
+      } else {
+        el.userTranscript.textContent = 'Ouvindo sua próxima fala...';
+      }
 
-      // Se nada for falado em 8,5s, encerra sozinho sem travar
+      // Se nada for falado no tempo limite, encerra sozinho sem travar
       initialTimer = setTimeout(() => {
         if (!latestTranscript.trim()) {
-          showToast('Não ouvi nenhuma fala. Tente novamente.', 'info', 3000);
+          if (!autoFollowUp) {
+            showToast('Não ouvi nenhuma fala. Tente novamente.', 'info', 3000);
+          } else {
+            state.conversationActive = false;
+          }
           triggerAutoStop();
         }
       }, INITIAL_NO_SPEECH_MS);
@@ -1931,6 +2675,13 @@
         return;
       }
 
+      // Em auto-follow-up, no-speech ou not-allowed silencioso encerra o ciclo sem poluir a tela
+      if (autoFollowUp && (event.error === 'no-speech' || event.error === 'aborted' || event.error === 'not-allowed')) {
+        state.conversationActive = false;
+        finalizeListening(true);
+        return;
+      }
+
       const errorMessages = {
         'not-allowed': 'Permissão de microfone negada. Libere o microfone nas configurações do navegador.',
         'service-not-allowed': 'Serviço de voz bloqueado no dispositivo.',
@@ -1942,6 +2693,7 @@
       if (msg) {
         showToast(msg, 'error', 4200);
       }
+      state.conversationActive = false;
       finalizeListening(true);
     };
 
@@ -1956,7 +2708,10 @@
       clearAllTimers();
       state.recognition = null;
       state.forceStopListening = null;
-      showToast('Não foi possível iniciar o microfone. Recarregue a página e tente novamente.', 'error', 3800);
+      state.conversationActive = false;
+      if (!autoFollowUp) {
+        showToast('Não foi possível iniciar o microfone. Recarregue a página e tente novamente.', 'error', 3800);
+      }
       setAssistantState('idle');
     }
   }
@@ -2032,7 +2787,27 @@
     }
   }
 
-  async function askGemini(question) {
+  function parseCreateEventActions(rawText) {
+    const actions = [];
+    const cleaned = String(rawText || '').replace(
+      /\[CREATE_EVENT\]([\s\S]*?)\[\/CREATE_EVENT\]/gi,
+      (_, jsonStr) => {
+        try {
+          const parsed = JSON.parse(jsonStr.trim());
+          if (parsed && (parsed.title || parsed.summary) && parsed.start) {
+            actions.push(parsed);
+          }
+        } catch (err) {
+          console.warn('Falha ao interpretar CREATE_EVENT:', err);
+        }
+        return '';
+      }
+    );
+    return { cleanedText: cleaned.trim(), actions };
+  }
+
+  async function askGemini(question, options = {}) {
+    const fromVoice = Boolean(options.fromVoice);
     const apiKey = getGeminiKey();
     const useServerProxy = !apiKey && state.serverGeminiConfigured;
 
@@ -2042,6 +2817,10 @@
       return;
     }
 
+    if (!fromVoice) {
+      state.conversationActive = false;
+    }
+
     // Cancela qualquer consulta anterior que ainda esteja em andamento
     if (state.currentAbortController) {
       state.currentAbortController._superseded = true;
@@ -2049,9 +2828,9 @@
       state.currentAbortController = null;
     }
 
-    stopSpeaking();
+    stopSpeaking(fromVoice);
     setAssistantState('thinking');
-    el.responseCard.classList.remove('hidden');
+    setResponseCardVisible(true);
     el.userTranscript.classList.remove('hidden');
     el.userTranscript.textContent = `“${question}”`;
     el.assistantReply.textContent = 'Pensando...';
@@ -2065,6 +2844,7 @@
       hour: '2-digit',
       minute: '2-digit',
     }).format(now);
+    const isoNowLocal = `${getLocalDateKey(now)}T${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:00`;
 
     const calendarContext = buildCalendarContextForGemini();
     const weatherContext = buildWeatherContextForGemini();
@@ -2073,9 +2853,10 @@
       'Você é o Smart Dock, um assistente pessoal inteligente por voz em português do Brasil.',
       'Suas respostas serão lidas em voz alta por síntese de fala (TTS): escreva de forma natural, clara, amigável e objetiva (1 a 3 frases curtas, salvo se o usuário pedir mais detalhes).',
       'NÃO use formatação markdown como asteriscos, negrito, hashtags, listas com marcadores ou emojis.',
-      `Data e hora atuais: ${formattedNow}.`,
+      `Data e hora atuais: ${formattedNow} (ISO local: ${isoNowLocal}).`,
       `Clima em tempo real:\n${weatherContext}`,
-      `Agenda de hoje do usuário:\n${calendarContext}`,
+      `Agenda da semana do usuário:\n${calendarContext}`,
+      'CRIAÇÃO DE EVENTOS NA AGENDA: Se o usuário pedir para criar, marcar, agendar ou adicionar um evento, reunião ou compromisso na agenda, confirme de forma natural na sua resposta falada e adicione OBRIGATORIAMENTE no final da resposta (em uma linha separada) o bloco JSON exato: [CREATE_EVENT]{"title":"Título curto","start":"YYYY-MM-DDTHH:MM:SS","end":"YYYY-MM-DDTHH:MM:SS","location":"","description":"","allDay":false}[/CREATE_EVENT]. Se o usuário não informar a duração, use 1 hora após o início. Use exatamente as datas do calendário de referência acima. Nunca mencione a tag CREATE_EVENT no texto falado.',
       'Use os dados reais de agenda e clima sempre que forem relevantes para a pergunta.',
     ].join('\n\n');
 
@@ -2218,7 +2999,45 @@
         throw new Error('O Gemini retornou uma resposta vazia.');
       }
 
-      const cleanReply = sanitizeTextForSpeech(rawReply);
+      const { cleanedText, actions } = parseCreateEventActions(rawReply);
+      let finalReplyText = cleanedText;
+
+      if (actions.length > 0) {
+        const createdTitles = [];
+        let disconnectedNotice = false;
+        let authNotice = false;
+        let errorMsg = '';
+
+        for (const evtAction of actions) {
+          const res = await createCalendarEvent(evtAction);
+          if (res.ok) {
+            createdTitles.push(evtAction.title || evtAction.summary);
+          } else if (res.reason === 'disconnected') {
+            disconnectedNotice = true;
+          } else if (res.reason === 'needs_auth') {
+            authNotice = true;
+          } else if (res.message) {
+            errorMsg = res.message;
+          }
+        }
+
+        if (createdTitles.length > 0) {
+          showToast(`Evento "${createdTitles[0]}" adicionado à agenda!`, 'success', 3800);
+          if (!finalReplyText) {
+            finalReplyText = `Pronto, adicionei ${createdTitles[0]} na sua agenda.`;
+          }
+        } else if (disconnectedNotice) {
+          showToast('Conecte sua Google Agenda (ou modo demonstração) para criar eventos.', 'info', 4600);
+          finalReplyText = 'Para criar esse evento, conecte sua Google Agenda primeiro no widget ao lado.';
+        } else if (authNotice) {
+          finalReplyText = 'Autorize a permissão na janela do Google para eu concluir a criação do evento na sua agenda.';
+        } else if (errorMsg) {
+          showToast(`Erro ao criar evento: ${errorMsg}`, 'error', 4600);
+          finalReplyText = `Não consegui salvar o evento na agenda: ${errorMsg}`;
+        }
+      }
+
+      const cleanReply = sanitizeTextForSpeech(finalReplyText || rawReply);
       state.lastReply = cleanReply;
       state.chatHistory.push(
         { role: 'user', parts: [{ text: question }] },
@@ -2319,6 +3138,7 @@
     }
 
     savePrefs({
+      ...state.prefs,
       voiceEngine: el.voiceEngineSelect?.value || 'gemini',
       geminiVoiceName: el.geminiVoiceSelect?.value || 'Aoede',
       voiceURI: el.voiceSelect.value,
@@ -2396,6 +3216,8 @@
       if (e.key === 'Escape') {
         if (!el.settingsModal.classList.contains('hidden')) closeSettingsModal();
         if (!el.iosFullscreenModal.classList.contains('hidden')) closeIosFullscreenGuide();
+        if (!el.agendaExpandedModal.classList.contains('hidden')) closeAgendaExpandedModal();
+        if (!el.weatherExpandedModal.classList.contains('hidden')) closeWeatherExpandedModal();
       }
     });
 
@@ -2416,41 +3238,150 @@
       }
     });
 
-    // Clima
-    el.weatherCityBtn.addEventListener('click', () => {
+    // Clima (widget clicável para abrir tela grande com gráficos)
+    el.weatherCityBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       el.weatherCityForm.classList.toggle('hidden');
       if (!el.weatherCityForm.classList.contains('hidden')) {
         el.weatherCityInput.focus();
       }
     });
 
-    el.cancelCitySearchBtn.addEventListener('click', () => {
+    el.cancelCitySearchBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       el.weatherCityForm.classList.add('hidden');
     });
 
     el.weatherCityForm.addEventListener('submit', (e) => {
       e.preventDefault();
+      e.stopPropagation();
       searchAndSetCity(el.weatherCityInput.value);
     });
 
-    el.weatherGpsBtn.addEventListener('click', detectWeatherByGPS);
-    el.refreshWeatherBtn.addEventListener('click', () => fetchWeather(false));
+    el.weatherGpsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      detectWeatherByGPS();
+    });
+    el.refreshWeatherBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fetchWeather(false);
+    });
+    el.expandWeatherBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openWeatherExpandedModal();
+    });
+    el.weatherWidget.addEventListener('click', (e) => {
+      if (e.target.closest('button, form, input')) return;
+      openWeatherExpandedModal();
+    });
+    el.closeWeatherModalBtn?.addEventListener('click', closeWeatherExpandedModal);
+    el.modalRefreshWeatherBtn?.addEventListener('click', () => fetchWeather(false));
+    el.weatherExpandedModal?.addEventListener('click', (e) => {
+      if (e.target === el.weatherExpandedModal) closeWeatherExpandedModal();
+    });
 
-    // Agenda
-    el.connectCalendarBtn.addEventListener('click', connectGoogleCalendar);
-    el.loadDemoBtn.addEventListener('click', () => loadDemoEvents(false));
-    el.refreshCalendarBtn.addEventListener('click', fetchTodayEvents);
-    el.disconnectCalendarBtn.addEventListener('click', disconnectCalendar);
+    // Agenda (alternador Dia/Semana + widget clicável para abrir semana em tela grande)
+    el.connectCalendarBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      connectGoogleCalendar(false);
+    });
+    el.loadDemoBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      loadDemoEvents(false);
+    });
+    el.refreshCalendarBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fetchTodayEvents();
+    });
+    el.disconnectCalendarBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      disconnectCalendar();
+    });
+    el.agendaRangeSwitch?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      setWidgetAgendaRange(btn.dataset.range);
+    });
+    el.expandAgendaBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openAgendaExpandedModal('week');
+    });
+    el.agendaWidget?.addEventListener('click', (e) => {
+      if (e.target.closest('button, form, input, a')) return;
+      openAgendaExpandedModal('week');
+    });
 
-    // Assistente de Voz, Comandos Rápidos e Texto
-    el.micBtn.addEventListener('click', startVoiceRecognition);
+    // Modal Expandido da Agenda
+    el.closeAgendaModalBtn?.addEventListener('click', closeAgendaExpandedModal);
+    el.agendaExpandedModal?.addEventListener('click', (e) => {
+      if (e.target === el.agendaExpandedModal) closeAgendaExpandedModal();
+    });
+    el.modalAgendaRangeSwitch?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.seg-btn');
+      if (!btn) return;
+      state.modalAgendaRange = btn.dataset.range === 'day' ? 'day' : 'week';
+      renderAgendaExpandedModal();
+    });
+    el.toggleNewEventFormBtn?.addEventListener('click', () => {
+      el.newEventForm.classList.toggle('hidden');
+      if (!el.newEventForm.classList.contains('hidden')) {
+        el.newEventTitle.focus();
+      }
+    });
+    el.cancelNewEventBtn?.addEventListener('click', () => {
+      el.newEventForm.classList.add('hidden');
+    });
+    el.newEventForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = el.newEventTitle.value.trim();
+      const dateStr = el.newEventDate.value;
+      const startTime = el.newEventStart.value;
+      const endTime = el.newEventEnd.value;
+      const location = el.newEventLocation.value.trim();
+      if (!title || !dateStr || !startTime) return;
+
+      const start = `${dateStr}T${startTime}:00`;
+      const end = endTime ? `${dateStr}T${endTime}:00` : null;
+      const res = await createCalendarEvent({ title, start, end, location, allDay: false });
+      if (res.ok) {
+        el.newEventForm.reset();
+        el.newEventDate.value = dateStr;
+        el.newEventStart.value = startTime;
+        el.newEventEnd.value = endTime;
+        el.newEventForm.classList.add('hidden');
+        showToast(`Evento "${title}" criado na agenda!`, 'success', 3200);
+      } else if (res.reason === 'disconnected') {
+        showToast('Conecte sua Google Agenda (ou modo demonstração) primeiro.', 'error', 4000);
+      } else if (res.reason !== 'needs_auth') {
+        showToast(`Erro ao criar evento: ${res.message}`, 'error', 4200);
+      }
+    });
+
+    // Assistente de Voz, Modo Conversa Fluida, Comandos Rápidos e Texto
+    el.micBtn.addEventListener('click', () => startVoiceRecognition(false));
+
+    el.fluidModeBtn?.addEventListener('click', () => {
+      const next = !state.prefs.continuousVoice;
+      savePrefs({ ...state.prefs, continuousVoice: next });
+      updateFluidModeUI();
+      if (!next) {
+        state.conversationActive = false;
+        cancelAutoListenTimer();
+      }
+      showToast(
+        next ? 'Conversa contínua ativada (microfone reabre após resposta).' : 'Conversa contínua desativada.',
+        'info',
+        2600
+      );
+    });
 
     el.quickPrompts.addEventListener('click', (e) => {
       const btn = e.target.closest('.quick-chip');
       if (!btn) return;
       unlockAudioOnFirstGesture();
       const prompt = btn.dataset.prompt;
-      if (prompt) askGemini(prompt);
+      if (prompt) askGemini(prompt, { fromVoice: false });
     });
 
     el.replayVoiceBtn.addEventListener('click', () => {
@@ -2461,12 +3392,12 @@
     });
 
     el.clearResponseBtn.addEventListener('click', () => {
-      stopSpeaking();
+      stopSpeaking(false);
       state.lastReply = '';
       state.chatHistory = [];
       el.userTranscript.textContent = '';
       el.assistantReply.textContent = '';
-      el.responseCard.classList.add('hidden');
+      setResponseCardVisible(false);
     });
 
     el.textForm.addEventListener('submit', (e) => {
@@ -2476,7 +3407,7 @@
       if (!q) return;
       el.textInput.value = '';
       el.textInput.blur();
-      askGemini(q);
+      askGemini(q, { fromVoice: false });
     });
 
     window.addEventListener('online', updateOnlineStatus);
@@ -2493,6 +3424,8 @@
     setupFullscreenButton();
     bindEvents();
     startClock();
+    updateFluidModeUI();
+    setWidgetAgendaRange('day');
     updateConfigBadge();
     updateOnlineStatus();
     registerServiceWorker();
