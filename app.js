@@ -15,22 +15,21 @@
     PREFS: 'smartdock_prefs',
     WEATHER_LOCATION: 'smartdock_weather_location',
     SESSION_TOKEN: 'smartdock_gcal_token_session',
+    PINNED_MODEL: 'smartdock_pinned_model',
   };
 
   const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash-lite';
   const GEMINI_FALLBACK_MODELS = [
     'gemini-2.5-flash-lite',
-    'gemini-3.5-flash-lite',
-    'gemini-flash-lite-latest',
-    'gemini-2.0-flash',
     'gemini-2.0-flash-lite',
+    'gemini-2.0-flash',
     'gemini-2.5-flash',
-    'gemini-3.8-flash',
+    'gemini-flash-lite-latest',
     'gemini-flash-latest',
   ];
   const GEMINI_TTS_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-2.5-pro-preview-tts'];
-  const GEMINI_REQUEST_TIMEOUT_MS = 12000;
-  const GEMINI_TTS_TIMEOUT_MS = 11000;
+  const GEMINI_REQUEST_TIMEOUT_MS = 7500;
+  const GEMINI_TTS_TIMEOUT_MS = 10000;
   const MODEL_COOLDOWN_MS = 60 * 1000; // 60s de pausa para modelo com 503/429
   const TTS_COOLDOWN_MS = 30 * 1000;   // 30s de pausa para TTS com erro temporário (60s em 429)
   const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
@@ -111,17 +110,19 @@
     currentAbortController: null,
     ttsAbortController: null,
     activeAudioSource: null,
+    activeAudioSources: [],
     activeHtmlAudio: null,
     activeAudioUrl: null,
     lastTtsCache: null,
     speechQueueId: 0,
-    lastWorkingModel: '',
+    lastWorkingModel: loadPinnedModel(),
     lastWorkingTtsModel: '',
     unavailableModels: new Set(),
     unavailableTtsModels: new Set(),
     modelCooldowns: new Map(),
     ttsCooldowns: new Map(),
     discoveredModels: null,
+    warmupPromise: null,
 
     // Preferências
     prefs: loadPrefs(),
@@ -238,6 +239,7 @@
     settingsForm: document.getElementById('settingsForm'),
     geminiKeyInput: document.getElementById('geminiKeyInput'),
     geminiModelSelect: document.getElementById('geminiModelSelect'),
+    pinnedModelHint: document.getElementById('pinnedModelHint'),
     toggleGeminiKeyBtn: document.getElementById('toggleGeminiKeyBtn'),
     googleClientIdInput: document.getElementById('googleClientIdInput'),
     settingsCityInput: document.getElementById('settingsCityInput'),
@@ -252,6 +254,7 @@
     currentOriginCode: document.getElementById('currentOriginCode'),
     copyOriginBtn: document.getElementById('copyOriginBtn'),
     clearKeysBtn: document.getElementById('clearKeysBtn'),
+    testConnectionBtn: document.getElementById('testConnectionBtn'),
 
     // Modal Guia Tela Cheia iOS
     iosFullscreenModal: document.getElementById('iosFullscreenModal'),
@@ -264,11 +267,49 @@
   // --------------------------------------------------------------------------
   // Utilitários de Armazenamento & UI
   // --------------------------------------------------------------------------
+  function isKnownFastModel(model) {
+    return typeof model === 'string' && GEMINI_FALLBACK_MODELS.includes(model);
+  }
+
+  function loadPinnedModel() {
+    try {
+      const saved = (localStorage.getItem(STORAGE_KEYS.PINNED_MODEL) || '').trim();
+      if (saved && isKnownFastModel(saved)) return saved;
+    } catch {
+      // Ignora
+    }
+    return '';
+  }
+
+  function savePinnedModel(model) {
+    const clean = String(model || '').trim();
+    if (!clean) return;
+    state.lastWorkingModel = clean;
+    try {
+      localStorage.setItem(STORAGE_KEYS.PINNED_MODEL, clean);
+    } catch {
+      // Ignora
+    }
+    if (el.responseModelLabel) {
+      el.responseModelLabel.textContent = clean.replace(/-/g, ' ');
+    }
+  }
+
   function loadPrefs() {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.PREFS);
       if (!raw) return { ...DEFAULT_PREFS };
-      return { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+      const merged = { ...DEFAULT_PREFS, ...JSON.parse(raw) };
+      // Migra automaticamente modelos obsoletos/inexistentes salvos em sessões anteriores
+      if (!isKnownFastModel(merged.geminiModel)) {
+        merged.geminiModel = DEFAULT_GEMINI_MODEL;
+        try {
+          localStorage.setItem(STORAGE_KEYS.PREFS, JSON.stringify(merged));
+        } catch {
+          // Ignora
+        }
+      }
+      return merged;
     } catch {
       return { ...DEFAULT_PREFS };
     }
@@ -411,7 +452,7 @@
           .filter(Boolean)
           .join(' ');
         return `
-          <div class="${classes}">
+          <div class="${classes}" data-msg-id="${escapeHtml(msg.id)}">
             <div class="chat-bubble-meta">
               <span>${label}</span>
               ${msg.time ? `<span>${escapeHtml(msg.time)}</span>` : ''}
@@ -451,6 +492,18 @@
     if (!msgRef) return;
     msgRef.text = String(newText || '');
     msgRef.isError = Boolean(isError);
+
+    // Atualização rápida in-place durante streaming (evita piscar/reconstruir todo o DOM)
+    const bubble = el.chatMessages?.querySelector(`[data-msg-id="${msgRef.id}"]`);
+    if (bubble) {
+      bubble.classList.toggle('is-error', msgRef.isError);
+      const textEl = bubble.querySelector('.chat-bubble-text');
+      if (textEl) {
+        textEl.textContent = msgRef.text;
+        el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+        return;
+      }
+    }
     renderChatMessages();
   }
 
@@ -2467,10 +2520,34 @@
     return null;
   }
 
+  function concatUint8Arrays(arrays) {
+    let total = 0;
+    for (const arr of arrays) total += arr.byteLength;
+    const out = new Uint8Array(total);
+    let offset = 0;
+    for (const arr of arrays) {
+      out.set(arr, offset);
+      offset += arr.byteLength;
+    }
+    return out;
+  }
+
   function cleanupActiveAudio() {
     if (state.ttsAbortController) {
       state.ttsAbortController.abort();
       state.ttsAbortController = null;
+    }
+    if (state.activeAudioSources && state.activeAudioSources.length) {
+      for (const src of state.activeAudioSources) {
+        try {
+          src.onended = null;
+          src.stop();
+          src.disconnect();
+        } catch {
+          // Ignora
+        }
+      }
+      state.activeAudioSources = [];
     }
     if (state.activeAudioSource) {
       try {
@@ -2883,7 +2960,236 @@
     }, startDelayMs);
   }
 
-  async function speakText(text) {
+  async function readSseJsonStream(response, onEvent) {
+    if (!response.body || typeof response.body.getReader !== 'function') {
+      const json = await response.json().catch(() => null);
+      if (json) await onEvent(json);
+      return;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    const processLine = async (line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) return;
+      const payload = trimmed.slice(5).trim();
+      if (!payload || payload === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(payload);
+        await onEvent(parsed);
+      } catch {
+        // Ignora fragmentos inválidos
+      }
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          await processLine(line);
+        }
+      }
+      if (buffer.trim()) {
+        await processLine(buffer);
+      }
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {
+        // Ignora
+      }
+    }
+  }
+
+  async function streamGeminiTtsAndPlay(cleanText, voiceName, queueId, signal) {
+    // 0) Replay instantâneo do cache (0ms)
+    if (
+      state.lastTtsCache &&
+      state.lastTtsCache.text === cleanText &&
+      state.lastTtsCache.voiceName === voiceName &&
+      state.lastTtsCache.audio
+    ) {
+      return playGeminiAudioPayload(state.lastTtsCache.audio, queueId);
+    }
+
+    const apiKey = getGeminiKey();
+    const useServerProxy = !apiKey && state.serverGeminiConfigured;
+    if (!apiKey || useServerProxy) {
+      const audio = await requestGeminiTtsAudio(cleanText, voiceName, signal);
+      if (queueId !== state.speechQueueId) return true;
+      if (audio) return playGeminiAudioPayload(audio, queueId);
+      return false;
+    }
+
+    const nowTs = Date.now();
+    const ttsCandidates = [
+      ...(state.lastWorkingTtsModel ? [state.lastWorkingTtsModel] : []),
+      ...GEMINI_TTS_MODELS.filter((m) => m !== state.lastWorkingTtsModel),
+    ].filter((m) => {
+      if (state.unavailableTtsModels.has(m)) return false;
+      const until = state.ttsCooldowns.get(m) || 0;
+      return nowTs >= until;
+    });
+
+    if (!ttsCandidates.length) return false;
+    const ttsModel = ttsCandidates[0];
+    const styledTtsPrompt = `Fale em português do Brasil, de forma natural, calorosa e com ritmo ágil: ${cleanText}`;
+    const rate = Math.min(1.4, Math.max(0.8, Number(state.prefs.speechRate) || 1.0));
+
+    // Verifica se podemos tocar chunks PCM ao vivo via AudioContext (menor latência possível)
+    let canLiveStreamCtx = false;
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        if (!state.audioCtx) state.audioCtx = new AudioCtx();
+        if (state.audioCtx.state !== 'running') {
+          await state.audioCtx.resume().catch(() => {});
+        }
+        // Usa streaming no AudioContext quando estiver 'running' e velocidade padrão (~1.0x)
+        canLiveStreamCtx = state.audioCtx.state === 'running' && Math.abs(rate - 1.0) < 0.06;
+      }
+    } catch {
+      canLiveStreamCtx = false;
+    }
+
+    const payload = {
+      contents: [{ role: 'user', parts: [{ text: styledTtsPrompt }] }],
+      generationConfig: {
+        responseModalities: ['AUDIO'],
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName } },
+        },
+      },
+    };
+
+    try {
+      const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(ttsModel)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
+      const response = await fetchWithTimeout(
+        endpoint,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        },
+        GEMINI_TTS_TIMEOUT_MS,
+        signal
+      );
+
+      if (!response.ok) {
+        if (response.status === 404 || response.status === 403) {
+          state.unavailableTtsModels.add(ttsModel);
+        } else if ([429, 500, 502, 503, 504].includes(response.status)) {
+          state.ttsCooldowns.set(ttsModel, Date.now() + (response.status === 429 ? 60000 : TTS_COOLDOWN_MS));
+          return false;
+        }
+        // Se streamGenerateContent retornou 400, tenta chamada padrão 1 vez
+        const fallbackAudio = await requestGeminiTtsAudio(cleanText, voiceName, signal);
+        if (queueId !== state.speechQueueId) return true;
+        if (fallbackAudio) return playGeminiAudioPayload(fallbackAudio, queueId);
+        return false;
+      }
+
+      const collectedChunks = [];
+      let detectedMime = 'audio/L16;codec=pcm;rate=24000';
+      let detectedSampleRate = 24000;
+      let nextPlayTime = 0;
+      let startedSpeaking = false;
+      let activePendingSources = 0;
+      let streamDone = false;
+
+      await readSseJsonStream(response, async (eventJson) => {
+        if (queueId !== state.speechQueueId) return;
+        const chunkAudio = extractInlineAudio(eventJson);
+        if (!chunkAudio || !chunkAudio.bytes?.byteLength) return;
+
+        detectedMime = chunkAudio.mimeType || detectedMime;
+        detectedSampleRate = chunkAudio.sampleRate || detectedSampleRate;
+        collectedChunks.push(chunkAudio.bytes);
+
+        const isRawPcm = /pcm|audio\/l16/i.test(detectedMime);
+        if (canLiveStreamCtx && isRawPcm && state.audioCtx && state.audioCtx.state === 'running') {
+          try {
+            const sampleCount = Math.floor(chunkAudio.bytes.byteLength / 2);
+            if (sampleCount > 0) {
+              const audioBuffer = state.audioCtx.createBuffer(1, sampleCount, detectedSampleRate);
+              const channel = audioBuffer.getChannelData(0);
+              const view = new DataView(
+                chunkAudio.bytes.buffer,
+                chunkAudio.bytes.byteOffset,
+                sampleCount * 2
+              );
+              for (let i = 0; i < sampleCount; i++) {
+                channel[i] = view.getInt16(i * 2, true) / 32768;
+              }
+              const src = state.audioCtx.createBufferSource();
+              src.buffer = audioBuffer;
+              src.connect(state.audioCtx.destination);
+
+              const now = state.audioCtx.currentTime;
+              const startAt = Math.max(now + 0.025, nextPlayTime);
+              nextPlayTime = startAt + audioBuffer.duration;
+              activePendingSources += 1;
+              state.activeAudioSources.push(src);
+
+              src.onended = () => {
+                activePendingSources -= 1;
+                const idx = state.activeAudioSources.indexOf(src);
+                if (idx >= 0) state.activeAudioSources.splice(idx, 1);
+                if (streamDone && activePendingSources <= 0 && queueId === state.speechQueueId) {
+                  handleSpeechFinished(queueId);
+                }
+              };
+
+              src.start(startAt);
+              if (!startedSpeaking) {
+                startedSpeaking = true;
+                setAssistantState('speaking', 'Falando...');
+              }
+            }
+          } catch (chunkErr) {
+            console.warn('Falha ao agendar chunk PCM ao vivo:', chunkErr);
+            canLiveStreamCtx = false;
+          }
+        }
+      });
+
+      streamDone = true;
+      if (queueId !== state.speechQueueId) return true;
+      if (!collectedChunks.length) return false;
+
+      const fullBytes = concatUint8Arrays(collectedChunks);
+      const fullAudio = {
+        bytes: fullBytes,
+        mimeType: detectedMime,
+        sampleRate: detectedSampleRate,
+      };
+      state.lastWorkingTtsModel = ttsModel;
+      state.lastTtsCache = { text: cleanText, voiceName, audio: fullAudio };
+
+      if (startedSpeaking) {
+        // Já tocou ao vivo via AudioContext; se todos os chunks já terminaram, encerra turno
+        if (activePendingSources <= 0) {
+          handleSpeechFinished(queueId);
+        }
+        return true;
+      }
+
+      // Caso AudioContext estivesse interrompido (ex.: iOS pós-microfone), toca via HTMLAudioElement persistente
+      return playGeminiAudioPayload(fullAudio, queueId);
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      console.warn(`Falha no streaming TTS (${ttsModel}):`, err?.message || err);
+      state.ttsCooldowns.set(ttsModel, Date.now() + TTS_COOLDOWN_MS);
+      return false;
+    }
+  }
+
+  async function speakText(text, override = {}) {
     const cleanText = sanitizeTextForSpeech(text);
     if (!cleanText) {
       setAssistantState('idle', '');
@@ -2904,26 +3210,31 @@
     }
 
     const queueId = ++state.speechQueueId;
-    const wantGeminiVoice = (state.prefs.voiceEngine || 'gemini') === 'gemini' && hasGeminiAccess();
+    const activeEngine = override.voiceEngine || state.prefs.voiceEngine || 'gemini';
+    const activeGeminiVoice = override.geminiVoiceName || state.prefs.geminiVoiceName || 'Aoede';
+    const wantGeminiVoice = activeEngine === 'gemini' && hasGeminiAccess();
 
     if (wantGeminiVoice) {
       const ttsController = new AbortController();
       state.ttsAbortController = ttsController;
-      setAssistantState('speaking', 'Preparando voz...');
+
+      // Só exibe "Preparando voz..." se passar de 450ms (evita piscar quando cache/streaming responde rápido)
+      const prepHintTimer = setTimeout(() => {
+        if (queueId === state.speechQueueId && state.ttsAbortController === ttsController && state.assistantState !== 'speaking') {
+          setAssistantState('speaking', 'Preparando voz...');
+        }
+      }, 450);
 
       try {
-        const voiceName = state.prefs.geminiVoiceName || 'Aoede';
-        const audio = await requestGeminiTtsAudio(cleanText, voiceName, ttsController.signal);
+        const played = await streamGeminiTtsAndPlay(cleanText, activeGeminiVoice, queueId, ttsController.signal);
+        clearTimeout(prepHintTimer);
         if (state.ttsAbortController === ttsController) {
           state.ttsAbortController = null;
         }
         if (queueId !== state.speechQueueId) return;
-
-        if (audio) {
-          const played = await playGeminiAudioPayload(audio, queueId);
-          if (played) return;
-        }
+        if (played) return;
       } catch (err) {
+        clearTimeout(prepHintTimer);
         if (state.ttsAbortController === ttsController) {
           state.ttsAbortController = null;
         }
@@ -3250,13 +3561,66 @@
   }
 
   function getThinkingConfigForModel(model) {
-    if (model === 'gemini-3.5-flash-lite') {
-      return { thinkingLevel: 'minimal' };
-    }
-    if (model === 'gemini-3.8-flash' || model === 'gemini-4-hydrogen') {
-      return { thinkingLevel: 'low' };
+    // Desativa tokens de raciocínio interno no Gemini 2.5 Flash/Flash-Lite para latência sub-segundo
+    if (/^gemini-2\.5-flash/i.test(model)) {
+      return { thinkingBudget: 0 };
     }
     return null;
+  }
+
+  function stripEventTagsForDisplay(text) {
+    return String(text || '')
+      .replace(/\[CREATE_EVENT\][\s\S]*?\[\/CREATE_EVENT\]/gi, '')
+      .replace(/\[CREATE_EVENT[\s\S]*$/i, '')
+      .trim();
+  }
+
+  async function warmUpGeminiConnection(force = false) {
+    const apiKey = getGeminiKey();
+    if (!apiKey) return null;
+    if (state.warmupPromise && !force) return state.warmupPromise;
+
+    state.warmupPromise = (async () => {
+      try {
+        if (force) state.discoveredModels = null;
+        const available = await discoverAvailableGeminiModels(apiKey);
+        if (!available.length) return null;
+        const availableSet = new Set(available);
+
+        // Marca antecipadamente modelos inexistentes nesta chave para nunca perder tempo tentando 404
+        for (const m of GEMINI_FALLBACK_MODELS) {
+          if (!availableSet.has(m)) {
+            state.unavailableModels.add(m);
+          } else {
+            state.unavailableModels.delete(m);
+          }
+        }
+
+        // Fixa automaticamente o modelo preferido se ativo, senão o mais rápido disponível
+        const preferred = state.prefs.geminiModel || DEFAULT_GEMINI_MODEL;
+        if (state.lastWorkingModel && availableSet.has(state.lastWorkingModel)) {
+          savePinnedModel(state.lastWorkingModel);
+        } else if (availableSet.has(preferred)) {
+          savePinnedModel(preferred);
+        } else {
+          const fastest = GEMINI_FALLBACK_MODELS.find((m) => availableSet.has(m)) || available[0];
+          if (fastest) savePinnedModel(fastest);
+        }
+        return state.lastWorkingModel || null;
+      } catch {
+        return null;
+      }
+    })();
+
+    return state.warmupPromise;
+  }
+
+  function extractGeminiStreamDelta(data) {
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    return parts
+      .filter((p) => !p.thought && typeof p.text === 'string')
+      .map((p) => p.text)
+      .join('');
   }
 
   function extractGeminiReply(data) {
@@ -3548,7 +3912,7 @@
         modelUsed = data._modelUsed || selectedModel;
         rawReply = extractGeminiReply(data);
       } else {
-        // Prioriza o último modelo que funcionou nesta sessão, depois os saudáveis (sem cooldown)
+        // Prioriza o modelo fixado que já funciona nesta chave, depois o escolhido e os saudáveis
         const nowTs = Date.now();
         const orderedRaw = [
           ...(state.lastWorkingModel ? [state.lastWorkingModel] : []),
@@ -3566,7 +3930,8 @@
         let lastError = 'Erro ao consultar o Gemini.';
         let sawOverload = false;
 
-        const callDirect = async (candidateModel, includeThinking) => {
+        // Streaming em tempo real (SSE): exibe texto em ~350ms e permite fala instantânea no modo local
+        const callDirectStream = async (candidateModel, includeThinking) => {
           const thinkingConfig = includeThinking ? getThinkingConfigForModel(candidateModel) : null;
           const payload = {
             ...basePayload,
@@ -3575,7 +3940,7 @@
               ...(thinkingConfig ? { thinkingConfig } : {}),
             },
           };
-          const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(candidateModel)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+          const endpoint = `${GEMINI_API_BASE}/${encodeURIComponent(candidateModel)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
           const response = await fetchWithTimeout(
             endpoint,
             {
@@ -3586,8 +3951,25 @@
             GEMINI_REQUEST_TIMEOUT_MS,
             controller.signal
           );
-          const json = await response.json().catch(() => ({}));
-          return { response, json };
+
+          if (!response.ok) {
+            const json = await response.json().catch(() => ({}));
+            return { response, json, streamedText: '' };
+          }
+
+          let accumulated = '';
+          await readSseJsonStream(response, async (chunkJson) => {
+            if (controller.signal.aborted) return;
+            const piece = extractGeminiStreamDelta(chunkJson);
+            if (piece) {
+              accumulated += piece;
+              const liveVisible = sanitizeTextForSpeech(stripEventTagsForDisplay(accumulated));
+              if (liveVisible) {
+                updateUiMessage(pendingMsg, liveVisible, false);
+              }
+            }
+          });
+          return { response, json: {}, streamedText: accumulated.trim() };
         };
 
         const tryModelList = async (list, triedSet) => {
@@ -3595,29 +3977,29 @@
             if (triedSet.has(candidateModel) || state.unavailableModels.has(candidateModel)) continue;
             triedSet.add(candidateModel);
 
-            if (triedSet.size > 1 && el.assistantStatus) {
-              el.assistantStatus.textContent = 'Modelo ocupado, tentando alternativa...';
+            // Só informa troca se realmente houve sobrecarga (nunca em modelo 404 obsoleto)
+            if (sawOverload && triedSet.size > 1 && el.assistantStatus) {
+              el.assistantStatus.textContent = 'Buscando resposta rápida...';
               el.assistantStatusBar?.classList.add('has-status');
             }
 
             try {
-              let { response, json } = await callDirect(candidateModel, true);
+              let { response, json, streamedText } = await callDirectStream(candidateModel, true);
 
               if (
                 !response.ok &&
                 response.status === 400 &&
                 /thinking/i.test(json?.error?.message || '')
               ) {
-                ({ response, json } = await callDirect(candidateModel, false));
+                ({ response, json, streamedText } = await callDirectStream(candidateModel, false));
               }
 
               data = json;
               if (response.ok) {
-                const extracted = extractGeminiReply(data);
-                if (extracted) {
-                  rawReply = extracted;
+                if (streamedText) {
+                  rawReply = streamedText;
                   modelUsed = candidateModel;
-                  state.lastWorkingModel = candidateModel;
+                  savePinnedModel(candidateModel);
                   state.modelCooldowns.delete(candidateModel);
                   succeeded = true;
                   return true;
@@ -3673,10 +4055,10 @@
         // Última tentativa com pequeno backoff caso seja pico passageiro de 503 high demand
         if (!succeeded && sawOverload) {
           if (el.assistantStatus) {
-            el.assistantStatus.textContent = 'Alta demanda no Gemini, tentando novamente...';
+            el.assistantStatus.textContent = 'Tentando novamente...';
             el.assistantStatusBar?.classList.add('has-status');
           }
-          await delayMs(1200, controller.signal);
+          await delayMs(900, controller.signal);
           const retryModel = state.lastWorkingModel || modelsToTry[0];
           if (retryModel && !state.unavailableModels.has(retryModel)) {
             const retrySet = new Set();
@@ -3791,6 +4173,11 @@
       const hasOption = Array.from(el.geminiModelSelect.options).some((o) => o.value === targetModel);
       el.geminiModelSelect.value = hasOption ? targetModel : DEFAULT_GEMINI_MODEL;
     }
+    if (el.pinnedModelHint) {
+      el.pinnedModelHint.textContent = state.lastWorkingModel
+        ? `Modelo fixado e ativo agora: ${state.lastWorkingModel}`
+        : 'O app fixa automaticamente o modelo mais rápido e ativo da sua chave.';
+    }
     if (el.voiceEngineSelect) {
       el.voiceEngineSelect.value = state.prefs.voiceEngine || 'gemini';
     }
@@ -3839,6 +4226,7 @@
       localStorage.removeItem(STORAGE_KEYS.GOOGLE_CLIENT_ID);
     }
 
+    const chosenModel = el.geminiModelSelect?.value || DEFAULT_GEMINI_MODEL;
     savePrefs({
       ...state.prefs,
       voiceEngine: el.voiceEngineSelect?.value || 'gemini',
@@ -3848,16 +4236,17 @@
       format24h: el.format24hToggle.checked,
       showSeconds: el.showSecondsToggle.checked,
       soundChimes: el.soundChimesToggle.checked,
-      geminiModel: el.geminiModelSelect?.value || DEFAULT_GEMINI_MODEL,
+      geminiModel: chosenModel,
     });
     state.lastTtsCache = null;
-    state.lastWorkingModel = '';
+    savePinnedModel(chosenModel);
     state.lastWorkingTtsModel = '';
     state.unavailableModels.clear();
     state.unavailableTtsModels.clear();
     state.modelCooldowns.clear();
     state.ttsCooldowns.clear();
     state.discoveredModels = null;
+    warmUpGeminiConnection(true);
 
     updateConfigBadge();
     updateClock();
@@ -3873,6 +4262,87 @@
     }
   }
 
+  async function testConnectionAndVoice() {
+    unlockAudioOnFirstGesture({ primeSpeech: true });
+    const apiKey = (el.geminiKeyInput?.value || '').trim() || getGeminiKey();
+    if (!apiKey && !state.serverGeminiConfigured) {
+      showToast('Cole sua GEMINI_API_KEY antes de testar.', 'error', 3600);
+      el.geminiKeyInput?.focus();
+      return;
+    }
+
+    const btn = el.testConnectionBtn;
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'Testando...';
+    }
+
+    try {
+      const selectedModel = el.geminiModelSelect?.value || DEFAULT_GEMINI_MODEL;
+      const t0 = performance.now();
+      let workingModel = selectedModel;
+
+      if (apiKey) {
+        const candidates = [selectedModel, ...GEMINI_FALLBACK_MODELS.filter((m) => m !== selectedModel)];
+        let ok = false;
+        let lastErr = 'Falha ao conectar';
+
+        for (const m of candidates) {
+          const thinkingConfig = getThinkingConfigForModel(m);
+          const res = await fetchWithTimeout(
+            `${GEMINI_API_BASE}/${encodeURIComponent(m)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ role: 'user', parts: [{ text: 'Responda apenas: Tudo pronto.' }] }],
+                generationConfig: {
+                  maxOutputTokens: 20,
+                  temperature: 0.2,
+                  ...(thinkingConfig ? { thinkingConfig } : {}),
+                },
+              }),
+            },
+            7000
+          );
+          if (res.ok) {
+            workingModel = m;
+            ok = true;
+            break;
+          }
+          const errJson = await res.json().catch(() => ({}));
+          lastErr = errJson?.error?.message || `HTTP ${res.status}`;
+        }
+        if (!ok) throw new Error(lastErr);
+      }
+
+      const elapsedMs = Math.round(performance.now() - t0);
+      savePinnedModel(workingModel);
+      if (el.geminiModelSelect && Array.from(el.geminiModelSelect.options).some((o) => o.value === workingModel)) {
+        el.geminiModelSelect.value = workingModel;
+      }
+      if (el.pinnedModelHint) {
+        el.pinnedModelHint.textContent = `✓ Testado e fixado: ${workingModel} (${elapsedMs} ms)`;
+      }
+      showToast(`Conectado em ${elapsedMs} ms (${workingModel})! Testando voz...`, 'success', 3400);
+
+      if (apiKey && !getGeminiKey()) {
+        localStorage.setItem(STORAGE_KEYS.GEMINI_API_KEY, apiKey);
+      }
+      speakText('Tudo pronto! Sua voz e o modelo rápido estão funcionando perfeitamente.', {
+        voiceEngine: el.voiceEngineSelect?.value || state.prefs.voiceEngine,
+        geminiVoiceName: el.geminiVoiceSelect?.value || state.prefs.geminiVoiceName,
+      });
+    } catch (err) {
+      showToast(`Erro no teste: ${err.message}`, 'error', 4800);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Testar IA e Voz';
+      }
+    }
+  }
+
   function handleClearKeys() {
     const confirmed = window.confirm(
       'Remover GEMINI_API_KEY e Google OAuth Client ID salvos neste navegador?'
@@ -3881,6 +4351,8 @@
 
     localStorage.removeItem(STORAGE_KEYS.GEMINI_API_KEY);
     localStorage.removeItem(STORAGE_KEYS.GOOGLE_CLIENT_ID);
+    localStorage.removeItem(STORAGE_KEYS.PINNED_MODEL);
+    state.lastWorkingModel = '';
     el.geminiKeyInput.value = '';
     el.googleClientIdInput.value = '';
     disconnectCalendar();
@@ -3916,6 +4388,7 @@
     el.cancelSettingsBtn.addEventListener('click', closeSettingsModal);
     el.settingsForm.addEventListener('submit', handleSaveSettings);
     el.clearKeysBtn.addEventListener('click', handleClearKeys);
+    el.testConnectionBtn?.addEventListener('click', testConnectionAndVoice);
 
     el.settingsModal.addEventListener('click', (e) => {
       if (e.target === el.settingsModal) closeSettingsModal();
@@ -4151,6 +4624,11 @@
     updateOnlineStatus();
     registerServiceWorker();
     checkServerConfig();
+    if (state.lastWorkingModel && el.responseModelLabel) {
+      el.responseModelLabel.textContent = state.lastWorkingModel.replace(/-/g, ' ');
+    }
+    // Pré-aquece a conexão com a API do Gemini e fixa o modelo mais rápido disponível (0 cota)
+    warmUpGeminiConnection();
 
     // Carrega clima imediatamente e atualiza a cada 15 minutos
     fetchWeather(true);
