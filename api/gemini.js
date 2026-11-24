@@ -1,23 +1,18 @@
 const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
 const ALLOWED_MODELS = new Set([
   'gemini-2.5-flash-lite',
-  'gemini-3.5-flash-lite',
-  'gemini-flash-lite-latest',
-  'gemini-2.0-flash',
   'gemini-2.0-flash-lite',
+  'gemini-2.0-flash',
   'gemini-2.5-flash',
-  'gemini-3.8-flash',
+  'gemini-flash-lite-latest',
   'gemini-flash-latest',
-  'gemini-4-hydrogen',
 ]);
 const FALLBACK_MODELS = [
   'gemini-2.5-flash-lite',
-  'gemini-3.5-flash-lite',
-  'gemini-flash-lite-latest',
-  'gemini-2.0-flash',
   'gemini-2.0-flash-lite',
+  'gemini-2.0-flash',
   'gemini-2.5-flash',
-  'gemini-3.8-flash',
+  'gemini-flash-lite-latest',
   'gemini-flash-latest',
 ];
 const TTS_FALLBACK_MODELS = [
@@ -34,14 +29,11 @@ const ALLOWED_VOICES = new Set([
   'Fenrir',
   'Orus',
 ]);
-const MODEL_TIMEOUT_MS = 9500;
+const MODEL_TIMEOUT_MS = 8500;
 
 function getThinkingConfigForModel(model) {
-  if (model === 'gemini-3.5-flash-lite') {
-    return { thinkingLevel: 'minimal' };
-  }
-  if (model === 'gemini-3.8-flash' || model === 'gemini-4-hydrogen') {
-    return { thinkingLevel: 'low' };
+  if (/^gemini-2\.5-flash/i.test(model)) {
+    return { thinkingBudget: 0 };
   }
   return null;
 }
