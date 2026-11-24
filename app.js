@@ -85,6 +85,7 @@
     continuousMode: false, // Começa DESATIVADO por padrão
     conversationActive: false,
     autoListenTimer: null,
+    autoResetTimer: null,
     speechStartTimer: null,
     activeUtterance: null,
     finalTranscript: '',
@@ -133,10 +134,10 @@
     summaryBtn: document.getElementById('summaryBtn'),
     continuousModeBtn: document.getElementById('continuousModeBtn'),
     stopVoiceBtn: document.getElementById('stopVoiceBtn'),
+    assistantStatusBar: document.getElementById('assistantStatusBar'),
     assistantStatus: document.getElementById('assistantStatus'),
     responseModelLabel: document.getElementById('responseModelLabel'),
     chatMessages: document.getElementById('chatMessages'),
-    chatEmptyState: document.getElementById('chatEmptyState'),
     replayVoiceBtn: document.getElementById('replayVoiceBtn'),
     clearResponseBtn: document.getElementById('clearResponseBtn'),
     textForm: document.getElementById('textForm'),
@@ -329,21 +330,54 @@
 
     setTimeout(() => {
       toast.style.opacity = '0';
-      toast.style.transform = 'translateY(8px)';
+      toast.style.transform = 'translateY(-8px)';
       toast.style.transition = 'opacity 220ms ease, transform 220ms ease';
       setTimeout(() => toast.remove(), 240);
     }, duration);
   }
 
+  function syncConversationLayout() {
+    const isOpen = state.assistantState !== 'idle' || state.uiMessages.length > 0;
+    el.body.classList.toggle('conversation-open', isOpen);
+  }
+
+  function cancelAutoResetConversation() {
+    if (state.autoResetTimer) {
+      clearTimeout(state.autoResetTimer);
+      state.autoResetTimer = null;
+    }
+  }
+
+  function resetConversationToIdle() {
+    cancelAutoResetConversation();
+    state.uiMessages = [];
+    state.chatHistory = [];
+    state.conversationActive = false;
+    renderChatMessages();
+    if (state.assistantState === 'idle') {
+      setAssistantState('idle', '');
+    }
+    syncConversationLayout();
+  }
+
+  function scheduleAutoResetConversation(delayMs = 5500) {
+    cancelAutoResetConversation();
+    state.autoResetTimer = setTimeout(() => {
+      state.autoResetTimer = null;
+      if (state.assistantState === 'idle' && !state.conversationActive) {
+        if (document.activeElement === el.textInput && el.textInput?.value.trim()) {
+          return;
+        }
+        resetConversationToIdle();
+      }
+    }, delayMs);
+  }
+
   function renderChatMessages() {
     if (!el.chatMessages) return;
     if (!state.uiMessages.length) {
-      el.chatMessages.innerHTML = `
-        <div class="chat-empty-state" id="chatEmptyState">
-          <p class="chat-empty-title">Como posso ajudar hoje?</p>
-          <p class="chat-empty-sub">Toque no microfone, clique em <strong>Resumo</strong> ou digite sua pergunta abaixo.</p>
-        </div>
-      `;
+      el.chatMessages.innerHTML = '';
+      syncConversationLayout();
       return;
     }
 
@@ -367,9 +401,11 @@
       .join('');
 
     el.chatMessages.scrollTop = el.chatMessages.scrollHeight;
+    syncConversationLayout();
   }
 
   function appendUiMessage(role, text, options = {}) {
+    cancelAutoResetConversation();
     const time = new Intl.DateTimeFormat('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',
@@ -420,17 +456,22 @@
   function setAssistantState(newState, statusMessage, isError = false) {
     state.assistantState = newState;
     el.body.dataset.state = newState;
+    if (newState !== 'idle') {
+      cancelAutoResetConversation();
+    }
+    syncConversationLayout();
     if (!el.assistantStatus) return;
 
     const defaultLabels = {
-      idle: 'Pronto para ouvir',
+      idle: '',
       listening: 'Ouvindo...',
       thinking: 'Consultando Gemini...',
       speaking: 'Falando...',
     };
-    el.assistantStatus.textContent =
-      statusMessage !== undefined ? statusMessage : defaultLabels[newState] || '';
+    const text = statusMessage !== undefined ? statusMessage : defaultLabels[newState] || '';
+    el.assistantStatus.textContent = text;
     el.assistantStatus.classList.toggle('is-error', Boolean(isError));
+    el.assistantStatusBar?.classList.toggle('has-status', Boolean(text));
   }
 
   function escapeHtml(str) {
@@ -487,8 +528,6 @@
     const events = ['touchstart', 'pointerdown', 'click', 'keydown'];
     const handler = (evt) => {
       const isMicTap = Boolean(evt?.target?.closest && evt.target.closest('#micBtn'));
-      // No toque direto no microfone, desbloqueia AudioContext mas não dispara speechSynthesis
-      // simultaneamente para não disputar a sessão de áudio com o SpeechRecognition no iOS
       unlockAudioOnFirstGesture({ primeSpeech: !isMicTap });
       if (state.audioUnlocked && state.speechPrimed) {
         events.forEach((e) => window.removeEventListener(e, handler, true));
@@ -526,7 +565,6 @@
       osc.type = 'sine';
 
       if (kind === 'turn') {
-        // Toquezinho bem suave e agradável indicando que é a vez do usuário falar
         osc.frequency.setValueAtTime(620, now);
         osc.frequency.exponentialRampToValueAtTime(840, now + 0.085);
         gain.gain.setValueAtTime(0.0008, now);
@@ -1967,7 +2005,6 @@
 
     setAgendaView('list');
 
-    // Lista estruturada estilo calendário (dia da semana, data, horários de início/fim e título)
     const todayKey = getLocalDateKey(now);
     const grouped = new Map();
     for (const evt of events) {
@@ -2392,14 +2429,14 @@
       }
     }
     if (state.assistantState === 'speaking' || customStatus !== undefined) {
-      setAssistantState('idle', customStatus !== undefined ? customStatus : 'Pronto para ouvir');
+      setAssistantState('idle', customStatus !== undefined ? customStatus : '');
     }
   }
 
   function handleSpeechFinished(queueId) {
     if (queueId !== state.speechQueueId) return;
     state.activeUtterance = null;
-    setAssistantState('idle', 'Pronto para ouvir');
+    setAssistantState('idle', '');
 
     // Conversa contínua: SÓ reabre automaticamente se a chave "Conversa Contínua" estiver ATIVADA
     if (state.continuousMode && state.conversationActive && !isAnyModalOpen()) {
@@ -2429,6 +2466,8 @@
       }, 320);
     } else {
       state.conversationActive = false;
+      // Quando termina o turno único, mantém o texto breve para leitura e volta ao layout normal
+      scheduleAutoResetConversation(6000);
     }
   }
 
@@ -2530,7 +2569,6 @@
     const rate = Math.min(1.4, Math.max(0.8, Number(state.prefs.speechRate) || 1.0));
     const isRawPcm = /pcm|audio\/l16/i.test(audio.mimeType || '');
 
-    // Tenta reproduzir via AudioContext (melhor compatibilidade no iOS Safari após unlock)
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (AudioCtx) {
@@ -2579,7 +2617,6 @@
       console.warn('Falha ao tocar áudio via AudioContext, tentando HTML Audio:', err);
     }
 
-    // Fallback via HTMLAudioElement + WAV Blob
     try {
       if (queueId !== state.speechQueueId) return true;
       const blob = isRawPcm
@@ -2599,7 +2636,7 @@
       htmlAudio.onerror = () => {
         cleanupActiveAudio();
         if (queueId === state.speechQueueId) {
-          setAssistantState('idle', 'Pronto para ouvir');
+          setAssistantState('idle', '');
         }
       };
 
@@ -2652,7 +2689,6 @@
       utterance.rate = rate;
       utterance.pitch = 1.0;
 
-      // Mantém referência forte para evitar bug de GC no Chrome
       state.activeUtterance = utterance;
 
       utterance.onend = () => {
@@ -2673,7 +2709,7 @@
           }
         }
         if (queueId === state.speechQueueId) {
-          setAssistantState('idle', 'Pronto para ouvir');
+          setAssistantState('idle', '');
         }
       };
 
@@ -2685,12 +2721,11 @@
       } catch (err) {
         console.warn('Falha ao chamar speechSynthesis.speak:', err);
         if (queueId === state.speechQueueId) {
-          setAssistantState('idle', 'Pronto para ouvir');
+          setAssistantState('idle', '');
         }
       }
     };
 
-    // Pequeno atraso após cancel() evita bug conhecido do Chrome/Safari que cancela a nova fala
     if (state.speechStartTimer) {
       clearTimeout(state.speechStartTimer);
       state.speechStartTimer = null;
@@ -2704,7 +2739,7 @@
   async function speakText(text) {
     const cleanText = sanitizeTextForSpeech(text);
     if (!cleanText) {
-      setAssistantState('idle', 'Pronto para ouvir');
+      setAssistantState('idle', '');
       return;
     }
 
@@ -2757,8 +2792,8 @@
   function startVoiceRecognition(isAutoFollowUp = false, retryCount = 0) {
     const autoFollowUp = isAutoFollowUp === true;
     cancelAutoListenTimer();
+    cancelAutoResetConversation();
 
-    // Se já estiver ouvindo, encerra imediatamente sem travar o estado
     if (state.assistantState === 'listening') {
       if (typeof state.forceStopListening === 'function') {
         state.forceStopListening();
@@ -2766,15 +2801,14 @@
         try {
           state.recognition.stop();
         } catch {
-          setAssistantState('idle', 'Pronto para ouvir');
+          setAssistantState('idle', '');
         }
       } else {
-        setAssistantState('idle', 'Pronto para ouvir');
+        setAssistantState('idle', '');
       }
       return;
     }
 
-    // Se estiver consultando o Gemini, cancela a requisição
     if (state.assistantState === 'thinking' && state.currentAbortController) {
       state.conversationActive = false;
       state.currentAbortController._userCancelled = true;
@@ -2782,10 +2816,10 @@
       state.currentAbortController = null;
       setAssistantState('idle', 'Consulta cancelada.');
       showToast('Consulta cancelada.', 'info', 2000);
+      scheduleAutoResetConversation(1500);
       return;
     }
 
-    // Se estiver falando e o usuário tocar no microfone, interrompe a fala e já começa a ouvir
     if (state.assistantState === 'speaking') {
       stopSpeaking(true);
     }
@@ -2806,16 +2840,13 @@
       return;
     }
 
-    // Conversa contínua SÓ fica ativa se a chave estiver ligada
     if (!autoFollowUp) {
       state.conversationActive = Boolean(state.continuousMode);
     }
 
-    // Para síntese ativa e garante AudioContext sem travar SpeechRecognition no iOS
     stopSpeaking(state.conversationActive);
     unlockAudioOnFirstGesture({ primeSpeech: false });
 
-    // Limpa qualquer instância anterior presa
     if (state.recognition) {
       try {
         state.recognition.onstart = null;
@@ -2830,7 +2861,6 @@
       state.recognition = null;
     }
 
-    // Configuração exata por turno para máxima confiabilidade em pt-BR (inclusive frases curtas como "Bom dia")
     const recognition = new SpeechRec();
     recognition.lang = 'pt-BR';
     recognition.interimResults = false;
@@ -2885,9 +2915,11 @@
         }
         setAssistantState(
           'idle',
-          idleStatus !== undefined ? idleStatus : 'Pronto para ouvir',
+          idleStatus !== undefined ? idleStatus : '',
           isError
         );
+        // Quando corta o microfone sem fala, limpa os textos e volta ao layout normal
+        scheduleAutoResetConversation(isError ? 3500 : 800);
       }
     };
 
@@ -2911,9 +2943,8 @@
 
     recognition.onstart = () => {
       if (isFinalized) return;
-      setAssistantState('listening', autoFollowUp ? 'Sua vez — pode falar...' : 'Ouvindo... fale agora');
+      setAssistantState('listening', autoFollowUp ? 'Sua vez — pode falar...' : 'Ouvindo...');
 
-      // Se o usuário não falar nada dentro do tempo limite, corta o microfone automaticamente
       noSpeechTimer = setTimeout(() => {
         if (!capturedTranscript.trim() && !isFinalized) {
           if (autoFollowUp) {
@@ -2928,7 +2959,7 @@
             true,
             autoFollowUp
               ? 'Silêncio detectado — microfone desligado.'
-              : 'Nenhuma fala detectada. Toque no microfone para tentar novamente.',
+              : 'Nenhuma fala detectada.',
             false
           );
         }
@@ -2949,7 +2980,6 @@
       state.finalTranscript = transcript;
       clearAllTimers();
 
-      // Envia imediatamente para o Gemini junto com agenda real (hoje/semana) e clima atual
       try {
         recognition.stop();
       } catch {
@@ -2963,7 +2993,7 @@
       state.conversationActive = false;
       finalizeListening(
         true,
-        'Não consegui entender. Toque no microfone para falar novamente.',
+        'Não consegui entender. Toque no microfone para tentar novamente.',
         true
       );
     };
@@ -2978,7 +3008,6 @@
         return;
       }
 
-      // Em modo contínuo, se o navegador abortar logo após o áudio da IA terminar, tenta 1 vez
       if (
         autoFollowUp &&
         state.continuousMode &&
@@ -3006,7 +3035,7 @@
       }
 
       if (manualStop && errCode === 'aborted') {
-        finalizeListening(true, 'Microfone pausado.', false);
+        finalizeListening(true, '', false);
         return;
       }
 
@@ -3022,7 +3051,7 @@
         errorMessages[errCode] ||
         (errCode !== 'aborted'
           ? `Erro no microfone (${errCode}). Toque para tentar novamente.`
-          : 'Pronto para ouvir');
+          : '');
 
       const isRealError = errCode !== 'aborted';
       if (isRealError) {
@@ -3061,6 +3090,7 @@
         showToast(failMsg, 'error', 3800);
       }
       setAssistantState('idle', failMsg, !autoFollowUp);
+      scheduleAutoResetConversation(3000);
     }
   }
 
@@ -3157,6 +3187,7 @@
 
   async function triggerMorningBriefing() {
     unlockAudioOnFirstGesture({ primeSpeech: true });
+    cancelAutoResetConversation();
     if (!hasGeminiAccess()) {
       setAssistantState('idle', 'Configure sua GEMINI_API_KEY nos Ajustes.', true);
       showToast('Configure sua GEMINI_API_KEY nos Ajustes para gerar o resumo.', 'error', 4000);
@@ -3188,10 +3219,8 @@
       return;
     }
 
-    // Conversa contínua só permanece ativa se a chave estiver ligada e o turno vier da voz
     state.conversationActive = Boolean(fromVoice && state.continuousMode);
 
-    // Cancela qualquer consulta anterior que ainda esteja em andamento
     if (state.currentAbortController) {
       state.currentAbortController._superseded = true;
       state.currentAbortController.abort();
@@ -3311,6 +3340,7 @@
           const candidateModel = modelsToTry[idx];
           if (idx > 0 && el.assistantStatus) {
             el.assistantStatus.textContent = `Tentando modelo alternativo (${candidateModel})...`;
+            el.assistantStatusBar?.classList.add('has-status');
           }
 
           try {
@@ -3415,15 +3445,15 @@
       }
 
       updateUiMessage(pendingMsg, cleanReply, false);
-      // Lê TODA resposta em voz alta automaticamente (voz, texto ou botão Resumo)
       speakText(cleanReply);
     } catch (err) {
       if (controller._superseded) return;
       if (controller._userCancelled) {
         updateUiMessage(pendingMsg, 'Consulta cancelada.', false);
         if (state.assistantState === 'thinking') {
-          setAssistantState('idle', 'Pronto para ouvir');
+          setAssistantState('idle', '');
         }
+        scheduleAutoResetConversation(1500);
         return;
       }
       console.error('Erro Gemini API:', err);
@@ -3432,11 +3462,12 @@
       updateUiMessage(pendingMsg, friendlyErr, true);
       showToast(friendlyErr, 'error', 5500);
       setAssistantState('idle', 'Erro ao consultar o Gemini.', true);
+      scheduleAutoResetConversation(5500);
     } finally {
       if (state.currentAbortController === controller) {
         state.currentAbortController = null;
         if (state.assistantState === 'thinking') {
-          setAssistantState('idle', 'Pronto para ouvir');
+          setAssistantState('idle', '');
         }
       }
     }
@@ -3607,7 +3638,7 @@
       }
     });
 
-    // Clima (widget clicável para abrir tela grande com gráficos)
+    // Clima
     el.weatherCityBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       el.weatherCityForm.classList.toggle('hidden');
@@ -3649,7 +3680,7 @@
       if (e.target === el.weatherExpandedModal) closeWeatherExpandedModal();
     });
 
-    // Agenda (alternador Hoje/Semana + widget clicável para abrir semana em tela grande)
+    // Agenda
     el.connectCalendarBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       connectGoogleCalendar(false);
@@ -3741,25 +3772,24 @@
       if (!state.continuousMode) {
         state.conversationActive = false;
         cancelAutoListenTimer();
-        setAssistantState(state.assistantState, 'Conversa contínua desativada.');
-      } else {
-        setAssistantState(state.assistantState, 'Conversa contínua ativada.');
       }
       showToast(
         state.continuousMode
-          ? 'Conversa contínua ativada (microfone reabre automaticamente após a resposta).'
-          : 'Conversa contínua desativada (um turno por vez).',
+          ? 'Conversa contínua ativada.'
+          : 'Conversa contínua desativada.',
         'info',
-        2800
+        2400
       );
     });
 
     el.stopVoiceBtn?.addEventListener('click', () => {
-      stopSpeaking(false, 'Fala interrompida.');
+      stopSpeaking(false, '');
+      scheduleAutoResetConversation(1800);
     });
 
     el.replayVoiceBtn?.addEventListener('click', () => {
       unlockAudioOnFirstGesture({ primeSpeech: true });
+      cancelAutoResetConversation();
       if (state.lastReply) {
         speakText(state.lastReply);
       } else {
@@ -3768,16 +3798,19 @@
     });
 
     el.clearResponseBtn?.addEventListener('click', () => {
-      stopSpeaking(false, 'Pronto para ouvir');
+      stopSpeaking(false, '');
       state.lastReply = '';
-      state.chatHistory = [];
-      state.uiMessages = [];
-      renderChatMessages();
+      resetConversationToIdle();
+    });
+
+    el.textInput?.addEventListener('focus', () => {
+      cancelAutoResetConversation();
     });
 
     el.textForm?.addEventListener('submit', (e) => {
       e.preventDefault();
       unlockAudioOnFirstGesture({ primeSpeech: true });
+      cancelAutoResetConversation();
       const q = el.textInput.value.trim();
       if (!q) return;
       el.textInput.value = '';
@@ -3799,22 +3832,19 @@
     setupFullscreenButton();
     bindEvents();
     startClock();
-    // Conversa contínua começa SEMPRE desativada por padrão
     state.continuousMode = false;
     updateContinuousModeUI();
     setWidgetAgendaRange('week');
     renderChatMessages();
-    setAssistantState('idle', 'Pronto para ouvir');
+    setAssistantState('idle', '');
     updateConfigBadge();
     updateOnlineStatus();
     registerServiceWorker();
     checkServerConfig();
 
-    // Carrega clima imediatamente e atualiza a cada 15 minutos
     fetchWeather(true);
     setInterval(() => fetchWeather(true), WEATHER_REFRESH_MS);
 
-    // Restaura sessão válida do Google Calendar
     if (restoreSessionToken()) {
       state.calendarMode = 'google';
       fetchTodayEvents();
